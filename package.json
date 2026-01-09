@@ -1,0 +1,53 @@
+{
+  "name": "bookie",
+  "version": "1.0.0",
+  "description": "School Library Management System with Convex backend",
+  "license": "MIT",
+  "packageManager": "bun@1.2.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"bunx convex dev\" \"turbo run dev --filter=@bookie/client --filter=bookie-kiosk\"",
+    "dev:client": "turbo run dev --filter=@bookie/client",
+    "dev:kiosk": "turbo run dev --filter=bookie-kiosk",
+    "dev:convex": "bunx convex dev",
+    "build": "turbo run build",
+    "build:client": "turbo run build --filter=@bookie/client",
+    "lint": "biome lint .",
+    "type-check": "turbo type-check",
+    "format": "biome format . --write",
+    "convex:deploy": "bunx convex deploy",
+    "deploy": "./scripts/deploy.sh",
+    "deploy:preview": "./scripts/deploy.sh preview",
+    "deploy:production": "./scripts/deploy.sh production",
+    "deploy:convex:preview": "./scripts/deploy.sh preview --skip-client",
+    "deploy:convex:production": "./scripts/deploy.sh production --skip-client",
+    "deploy:client:preview": "./scripts/deploy.sh preview --skip-convex",
+    "deploy:client:production": "./scripts/deploy.sh production --skip-convex"
+  },
+  "keywords": [
+    "library",
+    "school",
+    "convex",
+    "react",
+    "vite",
+    "tauri"
+  ],
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.11",
+    "bun-types": "latest",
+    "concurrently": "^8.2.2",
+    "jose": "^6.1.3",
+    "turbo": "^2.6.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@auth/core": "0.37.0",
+    "@convex-dev/auth": "^0.0.90",
+    "convex": "^1.31.3"
+  }
+}

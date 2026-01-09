@@ -1,0 +1,42 @@
+{
+  "name": "bookie-kiosk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev2": "vite",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@bookie/shared": "workspace:*",
+    "@bookie/ui": "workspace:*",
+    "@convex-dev/auth": "^0.0.90",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@tabler/icons-react": "^3.36.1",
+    "@tauri-apps/api": ">=2.0.0",
+    "@tauri-apps/plugin-shell": ">=2.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "convex": "^1.31.3",
+    "html5-qrcode": "^2.3.8",
+    "lucide-react": "^0.562.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": ">=2.0.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^22.19.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.7.3",
+    "vite": "^6.4.1"
+  }
+}

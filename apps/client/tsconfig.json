@@ -1,0 +1,35 @@
+{
+  "extends": "../../tsconfig.json",
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@/components/ui/*": [
+        "../../packages/ui/src/components/ui/*"
+      ],
+      "@convex/*": [
+        "../../convex/*"
+      ],
+      "@bookie/shared": [
+        "../../packages/shared/src/index.ts"
+      ],
+      "@bookie/ui": [
+        "../../packages/ui/src/index.ts"
+      ],
+      "@bookie/ui/*": [
+        "../../packages/ui/src/*"
+      ]
+    }
+  }
+}
