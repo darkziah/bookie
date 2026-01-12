@@ -1,5 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router"
 import { useState, useEffect } from "react";
+import { useForm, useStore } from "@tanstack/react-form";
+import { z } from "zod";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -25,6 +27,21 @@ import {
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 
+const settingsSchema = z.object({
+  schoolName: z.string().min(1),
+  libraryName: z.string().min(1),
+  borrowingDays: z.string().min(1),
+  maxRenewals: z.string().min(1),
+  overdueGracePeriod: z.string().min(1),
+  kioskTimeout: z.string().min(1),
+  accessionPrefix: z.string().min(1),
+  currency: z.string().min(1),
+  limit_1_3: z.string().min(1),
+  limit_4_6: z.string().min(1),
+  limit_7_10: z.string().min(1),
+  limit_11_12: z.string().min(1),
+});
+
 export const Route = createFileRoute("/settings/")({
   component: SettingsPage,
 });
@@ -43,25 +60,58 @@ function SettingsContent() {
   const initDefaults = useMutation(api.settings.initializeDefaults);
 
   const [isSaving, setIsSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    schoolName: "",
-    libraryName: "",
-    borrowingDays: "14",
-    maxRenewals: "2",
-    overdueGracePeriod: "0",
-    kioskTimeout: "30",
-    accessionPrefix: "B",
-    currency: "PHP",
-    // Borrowing limits by grade
-    limit_1_3: "1",
-    limit_4_6: "2",
-    limit_7_10: "5",
-    limit_11_12: "7",
+
+  const form = useForm({
+    defaultValues: {
+      schoolName: settings?.schoolName || "",
+      libraryName: settings?.libraryName || "",
+      borrowingDays: String(settings?.borrowingDays || 14),
+      maxRenewals: String(settings?.maxRenewals || 2),
+      overdueGracePeriod: String(settings?.overdueGracePeriod || 0),
+      kioskTimeout: String(settings?.kioskTimeout || 30),
+      accessionPrefix: settings?.accessionPrefix || "B",
+      currency: settings?.currency || "PHP",
+      limit_1_3: String(settings?.borrowingLimits?.["1-3"] || 1),
+      limit_4_6: String(settings?.borrowingLimits?.["4-6"] || 2),
+      limit_7_10: String(settings?.borrowingLimits?.["7-10"] || 5),
+      limit_11_12: String(settings?.borrowingLimits?.["11-12"] || 7),
+    },
+    validators: {
+      onChange: settingsSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setIsSaving(true);
+      try {
+        await setSetting({ key: "schoolName", value: value.schoolName });
+        await setSetting({ key: "libraryName", value: value.libraryName });
+        await setSetting({ key: "borrowingDays", value: parseInt(value.borrowingDays) });
+        await setSetting({ key: "maxRenewals", value: parseInt(value.maxRenewals) });
+        await setSetting({ key: "overdueGracePeriod", value: parseInt(value.overdueGracePeriod) });
+        await setSetting({ key: "kioskTimeout", value: parseInt(value.kioskTimeout) });
+        await setSetting({ key: "accessionPrefix", value: value.accessionPrefix });
+        await setSetting({ key: "currency", value: value.currency });
+        await setSetting({
+          key: "borrowingLimits",
+          value: {
+            "1-3": parseInt(value.limit_1_3),
+            "4-6": parseInt(value.limit_4_6),
+            "7-10": parseInt(value.limit_7_10),
+            "11-12": parseInt(value.limit_11_12),
+          },
+        });
+        toast.success("Settings saved successfully!");
+      } catch (error: any) {
+        toast.error("Failed to save settings", { description: error.message });
+      } finally {
+        setIsSaving(false);
+      }
+    },
   });
 
+  // Re-sync form when settings data changes
   useEffect(() => {
     if (settings) {
-      setFormData({
+      form.reset({
         schoolName: settings.schoolName || "",
         libraryName: settings.libraryName || "",
         borrowingDays: String(settings.borrowingDays || 14),
@@ -76,37 +126,7 @@ function SettingsContent() {
         limit_11_12: String(settings.borrowingLimits?.["11-12"] || 7),
       });
     }
-  }, [settings]);
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      // Save individual settings
-      await setSetting({ key: "schoolName", value: formData.schoolName });
-      await setSetting({ key: "libraryName", value: formData.libraryName });
-      await setSetting({ key: "borrowingDays", value: parseInt(formData.borrowingDays) });
-      await setSetting({ key: "maxRenewals", value: parseInt(formData.maxRenewals) });
-      await setSetting({ key: "overdueGracePeriod", value: parseInt(formData.overdueGracePeriod) });
-      await setSetting({ key: "kioskTimeout", value: parseInt(formData.kioskTimeout) });
-      await setSetting({ key: "accessionPrefix", value: formData.accessionPrefix });
-      await setSetting({ key: "currency", value: formData.currency });
-      await setSetting({
-        key: "borrowingLimits",
-        value: {
-          "1-3": parseInt(formData.limit_1_3),
-          "4-6": parseInt(formData.limit_4_6),
-          "7-10": parseInt(formData.limit_7_10),
-          "11-12": parseInt(formData.limit_11_12),
-        },
-      });
-
-      toast.success("Settings saved successfully!");
-    } catch (error: any) {
-      toast.error("Failed to save settings", { description: error.message });
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  }, [settings, form]);
 
   const handleInitDefaults = async () => {
     try {
@@ -138,14 +158,23 @@ function SettingsContent() {
             <IconRefresh className="mr-2 h-4 w-4" />
             Reset Defaults
           </Button>
-          <Button onClick={handleSave} disabled={isSaving} className="w-full sm:w-auto">
-            {isSaving ? (
-              <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <IconDeviceFloppy className="mr-2 h-4 w-4" />
+          <form.Subscribe
+            selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+            children={([canSubmit, isSubmitting]) => (
+              <Button
+                onClick={() => form.handleSubmit()}
+                disabled={isSaving || isSubmitting || !canSubmit}
+                className="w-full sm:w-auto"
+              >
+                {isSaving || isSubmitting ? (
+                  <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <IconDeviceFloppy className="mr-2 h-4 w-4" />
+                )}
+                Save Changes
+              </Button>
             )}
-            Save Changes
-          </Button>
+          />
         </div>
       </div>
 
@@ -160,46 +189,74 @@ function SettingsContent() {
             <CardDescription className="text-xs">Basic information about your school and library</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-6 p-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="schoolName" className="text-xs">School Name</Label>
-              <Input
-                id="schoolName"
-                value={formData.schoolName}
-                onChange={(e) => setFormData({ ...formData, schoolName: e.target.value })}
-                placeholder="Enter school name"
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="libraryName" className="text-xs">Library Name</Label>
-              <Input
-                id="libraryName"
-                value={formData.libraryName}
-                onChange={(e) => setFormData({ ...formData, libraryName: e.target.value })}
-                placeholder="Enter library name"
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="currency" className="text-xs">Currency</Label>
-              <Input
-                id="currency"
-                value={formData.currency}
-                onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                placeholder="PHP"
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="accessionPrefix" className="text-xs">Accession Number Prefix</Label>
-              <Input
-                id="accessionPrefix"
-                value={formData.accessionPrefix}
-                onChange={(e) => setFormData({ ...formData, accessionPrefix: e.target.value })}
-                placeholder="B"
-                className="text-sm"
-              />
-            </div>
+            <form.Field
+              name="schoolName"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">School Name</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="Enter school name"
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="libraryName"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Library Name</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="Enter library name"
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="currency"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Currency</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="PHP"
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="accessionPrefix"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Accession Number Prefix</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="B"
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
           </CardContent>
         </Card>
 
@@ -213,39 +270,60 @@ function SettingsContent() {
             <CardDescription className="text-xs">Configure borrowing periods and renewal policies</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-6 p-4 grid-cols-1 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="borrowingDays" className="text-xs">Borrowing Days</Label>
-              <Input
-                id="borrowingDays"
-                type="number"
-                value={formData.borrowingDays}
-                onChange={(e) => setFormData({ ...formData, borrowingDays: e.target.value })}
-                className="text-sm"
-              />
-              <p className="text-[10px] text-muted-foreground">Default loan period</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="maxRenewals" className="text-xs">Max Renewals</Label>
-              <Input
-                id="maxRenewals"
-                type="number"
-                value={formData.maxRenewals}
-                onChange={(e) => setFormData({ ...formData, maxRenewals: e.target.value })}
-                className="text-sm"
-              />
-              <p className="text-[10px] text-muted-foreground">Per transaction</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="overdueGracePeriod" className="text-xs">Grace Period (days)</Label>
-              <Input
-                id="overdueGracePeriod"
-                type="number"
-                value={formData.overdueGracePeriod}
-                onChange={(e) => setFormData({ ...formData, overdueGracePeriod: e.target.value })}
-                className="text-sm"
-              />
-              <p className="text-[10px] text-muted-foreground">Before marking overdue</p>
-            </div>
+            <form.Field
+              name="borrowingDays"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Borrowing Days</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Default loan period</p>
+                </div>
+              )}
+            />
+            <form.Field
+              name="maxRenewals"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Max Renewals</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Per transaction</p>
+                </div>
+              )}
+            />
+            <form.Field
+              name="overdueGracePeriod"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Grace Period (days)</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Before marking overdue</p>
+                </div>
+              )}
+            />
           </CardContent>
         </Card>
 
@@ -259,42 +337,66 @@ function SettingsContent() {
             <CardDescription className="text-xs">Maximum books a student can borrow at once</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-6 p-4 grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <Label className="text-xs">Grade 1-3</Label>
-              <Input
-                type="number"
-                value={formData.limit_1_3}
-                onChange={(e) => setFormData({ ...formData, limit_1_3: e.target.value })}
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">Grade 4-6</Label>
-              <Input
-                type="number"
-                value={formData.limit_4_6}
-                onChange={(e) => setFormData({ ...formData, limit_4_6: e.target.value })}
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">Grade 7-10</Label>
-              <Input
-                type="number"
-                value={formData.limit_7_10}
-                onChange={(e) => setFormData({ ...formData, limit_7_10: e.target.value })}
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">Grade 11-12</Label>
-              <Input
-                type="number"
-                value={formData.limit_11_12}
-                onChange={(e) => setFormData({ ...formData, limit_11_12: e.target.value })}
-                className="text-sm"
-              />
-            </div>
+            <form.Field
+              name="limit_1_3"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label className="text-xs">Grade 1-3</Label>
+                  <Input
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="limit_4_6"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label className="text-xs">Grade 4-6</Label>
+                  <Input
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="limit_7_10"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label className="text-xs">Grade 7-10</Label>
+                  <Input
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="limit_11_12"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label className="text-xs">Grade 11-12</Label>
+                  <Input
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            />
           </CardContent>
         </Card>
 
@@ -308,19 +410,26 @@ function SettingsContent() {
             <CardDescription className="text-xs">Configuration for the student self-service kiosk</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-6 p-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="kioskTimeout" className="text-xs">Auto-logout Timeout (seconds)</Label>
-              <Input
-                id="kioskTimeout"
-                type="number"
-                value={formData.kioskTimeout}
-                onChange={(e) => setFormData({ ...formData, kioskTimeout: e.target.value })}
-                className="text-sm"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                Kiosk will auto-logout after this period of inactivity
-              </p>
-            </div>
+            <form.Field
+              name="kioskTimeout"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Auto-logout Timeout (seconds)</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Kiosk will auto-logout after this period of inactivity
+                  </p>
+                </div>
+              )}
+            />
           </CardContent>
         </Card>
       </div>
@@ -329,19 +438,29 @@ function SettingsContent() {
 
       {/* Save Button at bottom */}
       <div className="flex justify-end pb-8">
-        <Button size="lg" onClick={handleSave} disabled={isSaving} className="w-full sm:w-auto h-12">
-          {isSaving ? (
-            <>
-              <IconLoader2 className="mr-2 h-5 w-5 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            <>
-              <IconDeviceFloppy className="mr-2 h-5 w-5" />
-              Save All Settings
-            </>
+        <form.Subscribe
+          selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+          children={([canSubmit, isSubmitting]) => (
+            <Button
+              size="lg"
+              onClick={() => form.handleSubmit()}
+              disabled={isSaving || isSubmitting || !canSubmit}
+              className="w-full sm:w-auto h-12"
+            >
+              {isSaving || isSubmitting ? (
+                <>
+                  <IconLoader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <IconDeviceFloppy className="mr-2 h-5 w-5" />
+                  Save All Settings
+                </>
+              )}
+            </Button>
           )}
-        </Button>
+        />
       </div>
     </div>
   );

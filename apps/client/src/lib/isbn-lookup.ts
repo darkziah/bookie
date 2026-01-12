@@ -15,6 +15,7 @@ export interface BookMetadata {
   pages?: number;
   subjects?: string[];
   description?: string;
+  category?: string;
 }
 
 interface OpenLibraryResponse {
@@ -128,6 +129,61 @@ export async function lookupIsbn(isbn: string): Promise<BookMetadata | null> {
     }
     throw new Error("Failed to lookup ISBN");
   }
+}
+
+/**
+ * Map subjects to book categories
+ */
+export function mapSubjectsToCategory(subjects: string[] | undefined): string {
+  if (!subjects || subjects.length === 0) return "general";
+
+  const subjectStr = subjects.join(" ").toLowerCase();
+
+  if (
+    subjectStr.includes("fiction") ||
+    subjectStr.includes("novel") ||
+    subjectStr.includes("literature") ||
+    subjectStr.includes("drama") ||
+    subjectStr.includes("poetry")
+  ) {
+    return "fiction";
+  }
+
+  if (
+    subjectStr.includes("children") ||
+    subjectStr.includes("juvenile") ||
+    subjectStr.includes("fairy tales")
+  ) {
+    return "children";
+  }
+
+  if (
+    subjectStr.includes("textbook") ||
+    subjectStr.includes("study and teaching")
+  ) {
+    return "textbook";
+  }
+
+  if (
+    subjectStr.includes("periodical") ||
+    subjectStr.includes("magazine") ||
+    subjectStr.includes("journal")
+  ) {
+    return "periodical";
+  }
+
+  if (
+    subjectStr.includes("handbook") ||
+    subjectStr.includes("encyclopedia") ||
+    subjectStr.includes("dictionary") ||
+    subjectStr.includes("reference")
+  ) {
+    return "reference";
+  }
+
+  // Default to non-fiction if it's not fiction but has subjects
+  // (Most library books with specific subjects are non-fiction unless identified as fiction)
+  return "non-fiction";
 }
 
 /**

@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useForm, useStore } from "@tanstack/react-form";
+import { z } from "zod";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -50,6 +52,14 @@ import {
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
+
+const studentSchema = z.object({
+  studentId: z.string().min(1, "Student ID is required"),
+  name: z.string().min(1, "Full name is required"),
+  gradeLevel: z.string().min(1, "Grade level is required"),
+  section: z.string(),
+  contactNumber: z.string(),
+});
 
 export const Route = createFileRoute("/students")({
   component: StudentsPage,
@@ -284,35 +294,38 @@ function StudentRow({ student }: { student: any }) {
 
 function AddStudentDialog({ onClose }: { onClose: () => void }) {
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    studentId: "",
-    name: "",
-    gradeLevel: "",
-    section: "",
-    contactNumber: "",
-  });
-
   const createStudent = useMutation(api.students.create);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setIsLoading(true);
-      await createStudent({
-        studentId: formData.studentId,
-        name: formData.name,
-        gradeLevel: Number(formData.gradeLevel),
-        section: formData.section || undefined,
-        phone: formData.contactNumber || undefined,
-      });
-      toast.success("Student created successfully!");
-      onClose();
-    } catch (error: any) {
-      toast.error("Failed to create student", { description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const form = useForm({
+    defaultValues: {
+      studentId: "",
+      name: "",
+      gradeLevel: "",
+      section: "",
+      contactNumber: "",
+    },
+    validators: {
+      onChange: studentSchema,
+    },
+    onSubmit: async ({ value }) => {
+      try {
+        setIsLoading(true);
+        await createStudent({
+          studentId: value.studentId,
+          name: value.name,
+          gradeLevel: Number(value.gradeLevel),
+          section: value.section || undefined,
+          phone: value.contactNumber || undefined,
+        });
+        toast.success("Student created successfully!");
+        onClose();
+      } catch (error: any) {
+        toast.error("Failed to create student", { description: error.message });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+  });
 
   return (
     <DialogContent className="w-[95vw] sm:max-w-md">
@@ -320,78 +333,126 @@ function AddStudentDialog({ onClose }: { onClose: () => void }) {
         <DialogTitle>Add New Student</DialogTitle>
         <DialogDescription>Enter the student's details to register them.</DialogDescription>
       </DialogHeader>
-      <form onSubmit={handleSubmit}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          form.handleSubmit();
+        }}
+      >
         <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto px-1">
-          <div className="space-y-2">
-            <Label htmlFor="studentId">Student ID *</Label>
-            <Input
-              id="studentId"
-              placeholder="e.g., 2024-0001"
-              value={formData.studentId}
-              onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="name">Full Name *</Label>
-            <Input
-              id="name"
-              placeholder="e.g., Juan Dela Cruz"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-            />
-          </div>
+          <form.Field
+            name="studentId"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Student ID *</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  placeholder="e.g., 2024-0001"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+          />
+          <form.Field
+            name="name"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Full Name *</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  placeholder="e.g., Juan Dela Cruz"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+          />
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="gradeLevel">Grade Level *</Label>
-              <Select
-                value={formData.gradeLevel}
-                onValueChange={(v) => setFormData({ ...formData, gradeLevel: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Grade" />
-                </SelectTrigger>
-                <SelectContent>
-                  {[...Array(12)].map((_, i) => (
-                    <SelectItem key={i + 1} value={String(i + 1)}>
-                      Grade {i + 1}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="section">Section</Label>
-              <Input
-                id="section"
-                placeholder="Faith"
-                value={formData.section}
-                onChange={(e) => setFormData({ ...formData, section: e.target.value })}
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="contact">Contact Number</Label>
-            <Input
-              id="contact"
-              placeholder="0912..."
-              value={formData.contactNumber}
-              onChange={(e) => setFormData({ ...formData, contactNumber: e.target.value })}
+            <form.Field
+              name="gradeLevel"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Grade Level *</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v)}
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue placeholder="Grade" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[...Array(12)].map((_, i) => (
+                        <SelectItem key={i + 1} value={String(i + 1)}>
+                          Grade {i + 1}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+            <form.Field
+              name="section"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Section</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    placeholder="Faith"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
             />
           </div>
+          <form.Field
+            name="contactNumber"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Contact Number</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  placeholder="0912..."
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+              </div>
+            )}
+          />
         </div>
         <DialogFooter className="flex-row gap-2 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="flex-1">
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading || !formData.studentId || !formData.name || !formData.gradeLevel} className="flex-1">
-            {isLoading ? (
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              "Create"
+          <form.Subscribe
+            selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+            children={([canSubmit, isSubmitting]) => (
+              <Button
+                type="submit"
+                disabled={isLoading || isSubmitting || !canSubmit}
+                className="flex-1"
+              >
+                {isLoading || isSubmitting ? (
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Create"
+                )}
+              </Button>
             )}
-          </Button>
+          />
         </DialogFooter>
       </form>
     </DialogContent>
@@ -400,34 +461,37 @@ function AddStudentDialog({ onClose }: { onClose: () => void }) {
 
 function EditStudentDialog({ student, onClose }: { student: any; onClose: () => void }) {
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    name: student.name,
-    gradeLevel: String(student.gradeLevel),
-    section: student.section || "",
-    contactNumber: student.contactNumber || "",
-  });
-
   const updateStudent = useMutation(api.students.update);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setIsLoading(true);
-      await updateStudent({
-        id: student._id as Id<"students">,
-        name: formData.name,
-        gradeLevel: Number(formData.gradeLevel),
-        section: formData.section || undefined,
-        phone: formData.contactNumber || undefined,
-      });
-      toast.success("Student updated successfully!");
-      onClose();
-    } catch (error: any) {
-      toast.error("Failed to update student", { description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const form = useForm({
+    defaultValues: {
+      name: student.name,
+      gradeLevel: String(student.gradeLevel),
+      section: student.section || "",
+      contactNumber: student.contactNumber || "",
+    },
+    validators: {
+      onChange: studentSchema.omit({ studentId: true }),
+    },
+    onSubmit: async ({ value }) => {
+      try {
+        setIsLoading(true);
+        await updateStudent({
+          id: student._id as Id<"students">,
+          name: value.name,
+          gradeLevel: Number(value.gradeLevel),
+          section: value.section || undefined,
+          phone: value.contactNumber || undefined,
+        });
+        toast.success("Student updated successfully!");
+        onClose();
+      } catch (error: any) {
+        toast.error("Failed to update student", { description: error.message });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+  });
 
   return (
     <DialogContent className="w-[95vw] sm:max-w-md">
@@ -435,69 +499,110 @@ function EditStudentDialog({ student, onClose }: { student: any; onClose: () => 
         <DialogTitle>Edit Student</DialogTitle>
         <DialogDescription>Update {student.name}'s information.</DialogDescription>
       </DialogHeader>
-      <form onSubmit={handleSubmit}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          form.handleSubmit();
+        }}
+      >
         <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto px-1">
           <div className="space-y-2">
             <Label>Student ID</Label>
             <Input value={student.studentId} disabled className="bg-muted opacity-80" />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="name">Full Name *</Label>
-            <Input
-              id="name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-            />
-          </div>
+          <form.Field
+            name="name"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Full Name *</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+          />
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="gradeLevel">Grade Level *</Label>
-              <Select
-                value={formData.gradeLevel}
-                onValueChange={(v) => setFormData({ ...formData, gradeLevel: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[...Array(12)].map((_, i) => (
-                    <SelectItem key={i + 1} value={String(i + 1)}>
-                      Grade {i + 1}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="section">Section</Label>
-              <Input
-                id="section"
-                value={formData.section}
-                onChange={(e) => setFormData({ ...formData, section: e.target.value })}
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="contact">Contact Number</Label>
-            <Input
-              id="contact"
-              value={formData.contactNumber}
-              onChange={(e) => setFormData({ ...formData, contactNumber: e.target.value })}
+            <form.Field
+              name="gradeLevel"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Grade Level *</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v)}
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[...Array(12)].map((_, i) => (
+                        <SelectItem key={i + 1} value={String(i + 1)}>
+                          Grade {i + 1}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+            <form.Field
+              name="section"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Section</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
             />
           </div>
+          <form.Field
+            name="contactNumber"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Contact Number</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+              </div>
+            )}
+          />
         </div>
         <DialogFooter className="flex-row gap-2 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="flex-1">
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading} className="flex-1">
-            {isLoading ? (
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              "Save"
+          <form.Subscribe
+            selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+            children={([canSubmit, isSubmitting]) => (
+              <Button
+                type="submit"
+                disabled={isLoading || isSubmitting || !canSubmit}
+                className="flex-1"
+              >
+                {isLoading || isSubmitting ? (
+                  <IconLoader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Save"
+                )}
+              </Button>
             )}
-          </Button>
+          />
         </DialogFooter>
       </form>
     </DialogContent>

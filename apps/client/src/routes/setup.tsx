@@ -14,15 +14,20 @@ import {
 } from "@bookie/ui/components/ui/card";
 import { IconBook, IconLoader2, IconShieldCheck } from "@tabler/icons-react";
 import { toast } from "sonner";
+import { useForm } from "@tanstack/react-form";
+import { z } from "zod";
 
 export const Route = createFileRoute("/setup")({
   component: SetupPage,
 });
 
+const setupSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+});
+
 function SetupPage() {
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const [isLoading, setIsLoading] = useState(false);
-  const [name, setName] = useState("");
 
   const currentUser = useQuery(
     api.librarians.getCurrentUser,
@@ -36,6 +41,41 @@ function SetupPage() {
 
   const setupFirstAdmin = useMutation(api.librarians.setupFirstAdmin);
   const acceptInvite = useMutation(api.librarians.acceptInvite);
+
+  const form = useForm({
+    defaultValues: {
+      name: "",
+    },
+    validators: {
+      onChange: setupSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setIsLoading(true);
+      try {
+        if (systemRequiresSetup) {
+          if (!value.name?.trim()) {
+            toast.error("Name is required");
+            setIsLoading(false);
+            return;
+          }
+          await setupFirstAdmin({ name: value.name.trim() });
+          toast.success("Admin account created successfully!");
+        } else {
+          // For invited users, we try to accept the invite via email
+          if (currentUser?.email) {
+            await acceptInvite({ email: currentUser.email });
+            toast.success("Welcome to the team!");
+          } else {
+            throw new Error("User email not found. Please contact admin.");
+          }
+        }
+      } catch (error: any) {
+        toast.error(error.message || "Failed to complete setup");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+  });
 
   // Redirect if not authenticated
   if (authLoading) {
@@ -63,35 +103,6 @@ function SetupPage() {
       </div>
     );
   }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    setIsLoading(true);
-    try {
-      if (systemRequiresSetup) {
-        if (!name.trim()) {
-          toast.error("Name is required");
-          setIsLoading(false);
-          return;
-        }
-        await setupFirstAdmin({ name: name.trim() });
-        toast.success("Admin account created successfully!");
-      } else {
-        // For invited users, we try to accept the invite via email
-        if (currentUser?.email) {
-          await acceptInvite({ email: currentUser.email });
-          toast.success("Welcome to the team!");
-        } else {
-          throw new Error("User email not found. Please contact admin.");
-        }
-      }
-    } catch (error: any) {
-      toast.error(error.message || "Failed to complete setup");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 p-4">
@@ -123,37 +134,59 @@ function SetupPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                form.handleSubmit();
+              }}
+              className="space-y-4"
+            >
               {systemRequiresSetup && (
-                <div className="space-y-2">
-                  <Label htmlFor="name">Your Name</Label>
-                  <Input
-                    id="name"
-                    type="text"
-                    placeholder="Enter your full name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    disabled={isLoading}
-                  />
-                </div>
+                <form.Field
+                  name="name"
+                  children={(field) => (
+                    <div className="space-y-2">
+                      <Label htmlFor={field.name}>Your Name</Label>
+                      <Input
+                        id={field.name}
+                        name={field.name}
+                        type="text"
+                        placeholder="Enter your full name"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        required
+                        disabled={isLoading}
+                      />
+                      {field.state.meta.errors ? (
+                        <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                      ) : null}
+                    </div>
+                  )}
+                />
               )}
 
-              <Button
-                type="submit"
-                className="w-full"
-                size="lg"
-                disabled={isLoading || (systemRequiresSetup && !name.trim())}
-              >
-                {isLoading ? (
-                  <>
-                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  systemRequiresSetup ? "Complete Setup" : "Link Account"
+              <form.Subscribe
+                selector={(state) => [state.canSubmit, state.isSubmitting]}
+                children={([canSubmit, isSubmitting]) => (
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    size="lg"
+                    disabled={isLoading || (systemRequiresSetup && !canSubmit) || isSubmitting}
+                  >
+                    {isLoading || isSubmitting ? (
+                      <>
+                        <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      systemRequiresSetup ? "Complete Setup" : "Link Account"
+                    )}
+                  </Button>
                 )}
-              </Button>
+              />
             </form>
           </CardContent>
         </Card>

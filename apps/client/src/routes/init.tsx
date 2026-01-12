@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
@@ -15,20 +15,24 @@ import {
 } from "@bookie/ui/components/ui/card";
 import { IconBook, IconLoader2, IconShieldCheck } from "@tabler/icons-react";
 import { toast } from "sonner";
+import { useForm } from "@tanstack/react-form";
+import { zodValidator } from "@tanstack/zod-form-adapter";
+import { z } from "zod";
 
 export const Route = createFileRoute("/init")({
   component: InitPage,
+});
+
+const initSchema = z.object({
+  name: z.string().min(1, "Full name is required"),
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
 function InitPage() {
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const { signIn } = useAuthActions();
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-  });
 
   // Check if system needs initial setup
   const systemRequiresSetup = useQuery(api.librarians.requiresSetup);
@@ -40,6 +44,31 @@ function InitPage() {
   );
 
   const setupFirstAdmin = useMutation(api.librarians.setupFirstAdmin);
+
+  const form = useForm({
+    defaultValues: {
+      name: "",
+      email: "",
+      password: "",
+    },
+    validators: {
+      onChange: initSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setIsLoading(true);
+      try {
+        await signIn("password", {
+          email: value.email,
+          password: value.password,
+          flow: "signUp",
+        });
+        // The useEffect below will handle setupFirstAdmin after auth completes
+      } catch (error: any) {
+        toast.error(error.message || "Initialization failed");
+        setIsLoading(false);
+      }
+    },
+  });
 
   // If system is already set up, go to login
   if (systemRequiresSetup === false) {
@@ -59,7 +88,8 @@ function InitPage() {
         setIsLoading(true);
         try {
           // Use name from form if available, otherwise email prefix
-          const adminName = formData.name || formData.email.split("@")[0] || "Admin";
+          const values = form.state.values;
+          const adminName = values.name || values.email.split("@")[0] || "Admin";
           await setupFirstAdmin({ name: adminName });
           toast.success("System initialized successfully!");
         } catch (error: any) {
@@ -70,24 +100,7 @@ function InitPage() {
       }
     }
     handleAutoSetup();
-  }, [isAuthenticated, currentLibrarian, systemRequiresSetup, setupFirstAdmin, formData.name, formData.email]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    try {
-      await signIn("password", {
-        email: formData.email,
-        password: formData.password,
-        flow: "signUp",
-      });
-      // The useEffect above will handle setupFirstAdmin after auth completes
-    } catch (error: any) {
-      toast.error(error.message || "Initialization failed");
-      setIsLoading(false);
-    }
-  };
+  }, [isAuthenticated, currentLibrarian, systemRequiresSetup, setupFirstAdmin, form.state.values]);
 
   if (authLoading || systemRequiresSetup === undefined) {
     return (
@@ -125,64 +138,100 @@ function InitPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  placeholder="Enter your full name"
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Admin Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="admin@example.com"
-                  value={formData.email}
-                  onChange={(e) =>
-                    setFormData({ ...formData, email: e.target.value })
-                  }
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Create a strong password"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
-                  required
-                  disabled={isLoading}
-                  minLength={8}
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full"
-                size="lg"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <>
-                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Initializing...
-                  </>
-                ) : (
-                  "Create Admin Account"
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                form.handleSubmit();
+              }}
+              className="space-y-4"
+            >
+              <form.Field
+                name="name"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name}>Full Name</Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Enter your full name"
+                      required
+                      disabled={isLoading}
+                    />
+                    {field.state.meta.errors ? (
+                      <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                    ) : null}
+                  </div>
                 )}
-              </Button>
+              />
+              <form.Field
+                name="email"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name}>Admin Email</Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      type="email"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="admin@example.com"
+                      required
+                      disabled={isLoading}
+                    />
+                    {field.state.meta.errors ? (
+                      <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                    ) : null}
+                  </div>
+                )}
+              />
+              <form.Field
+                name="password"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name}>Password</Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      type="password"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Create a strong password"
+                      required
+                      disabled={isLoading}
+                      minLength={8}
+                    />
+                    {field.state.meta.errors ? (
+                      <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                    ) : null}
+                  </div>
+                )}
+              />
+              <form.Subscribe
+                selector={(state) => [state.canSubmit, state.isSubmitting]}
+                children={([canSubmit, isSubmitting]) => (
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    size="lg"
+                    disabled={isLoading || !canSubmit || isSubmitting}
+                  >
+                    {isLoading || isSubmitting ? (
+                      <>
+                        <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Initializing...
+                      </>
+                    ) : (
+                      "Create Admin Account"
+                    )}
+                  </Button>
+                )}
+              />
             </form>
 
             <p className="text-xs text-amber-600/80 text-center mt-6">

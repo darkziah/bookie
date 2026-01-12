@@ -56,7 +56,7 @@ async function calculateDueDate(ctx: any, borrowingDays: number): Promise<number
 }
 
 // Validate student can borrow
-async function validateBorrowing(ctx: any, studentId: any, bookId: any) {
+async function validateBorrowing(ctx: any, studentId: any, bookId: any, overrideLimits = false) {
   const student = await ctx.db.get(studentId);
   if (!student) {
     return { valid: false, error: "Student not found" };
@@ -80,7 +80,7 @@ async function validateBorrowing(ctx: any, studentId: any, bookId: any) {
     .filter((q: any) => q.eq(q.field("isReturned"), false))
     .collect();
 
-  if (activeLoans.length >= student.borrowingLimit) {
+  if (!overrideLimits && activeLoans.length >= student.borrowingLimit) {
     return {
       valid: false,
       error: `Borrowing limit reached (${activeLoans.length}/${student.borrowingLimit})`,
@@ -107,12 +107,13 @@ export const checkOut = mutation({
     studentId: v.id("students"),
     bookId: v.id("books"),
     device: v.optional(v.string()),
+    overrideLimits: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const librarian = await requireLibrarian(ctx);
 
     // Validate
-    const validation = await validateBorrowing(ctx, args.studentId, args.bookId);
+    const validation = await validateBorrowing(ctx, args.studentId, args.bookId, args.overrideLimits);
     if (!validation.valid) {
       throw new Error(validation.error);
     }

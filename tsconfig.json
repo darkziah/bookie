@@ -23,6 +23,10 @@
     "baseUrl": "."
   },
   "exclude": [
-    "node_modules"
+    "**/node_modules",
+    "**/dist",
+    "**/target",
+    "convex/_generated",
+    "generateKeys.mjs"
   ]
 }

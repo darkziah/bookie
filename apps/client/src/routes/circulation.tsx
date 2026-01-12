@@ -12,6 +12,11 @@ import {
   CardTitle,
 } from "@bookie/ui/components/ui/card";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@bookie/ui/components/ui/collapsible";
+import {
   Tabs,
   TabsContent,
   TabsList,
@@ -25,6 +30,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@bookie/ui/components/ui/dialog";
+import { Checkbox } from "@bookie/ui/components/ui/checkbox";
+import { Label } from "@bookie/ui/components/ui/label";
 import { Badge } from "@bookie/ui/components/ui/badge";
 import {
   IconArrowDown,
@@ -35,6 +42,9 @@ import {
   IconLoader2,
   IconRefresh,
   IconHistory,
+  IconChevronDown,
+  IconChevronLeft,
+  IconChevronRight,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
@@ -55,6 +65,7 @@ function CirculationPage() {
 
 function CirculationContent() {
   const [activeTab, setActiveTab] = useState<"checkout" | "checkin">("checkout");
+  const [isActivityOpen, setIsActivityOpen] = useState(true);
   const recentTransactions = useQuery(api.transactions.getRecent, { limit: 5 });
 
   return (
@@ -65,8 +76,8 @@ function CirculationContent() {
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        <div className="flex-1 w-full min-w-0 space-y-6">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="checkout" className="gap-2">
@@ -89,53 +100,102 @@ function CirculationContent() {
           </Tabs>
         </div>
 
-        {/* Recent Activity Sidebar - Stacks on mobile */}
-        <Card className="h-fit">
-          <CardHeader className="pb-3 px-4">
-            <CardTitle className="flex items-center gap-2 text-base font-semibold">
-              <IconHistory className="h-5 w-5 text-primary" />
-              Recent Activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            {recentTransactions === undefined ? (
-              <div className="flex items-center justify-center py-8">
-                <IconLoader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        {/* Recent Activity Sidebar - Stacks on mobile, Collapses on desktop */}
+        <Collapsible
+          open={isActivityOpen}
+          onOpenChange={setIsActivityOpen}
+          className={`shrink-0 transition-all duration-300 ease-in-out ${isActivityOpen ? "w-full lg:w-80" : "w-full lg:w-16 h-fit"}`}
+        >
+          {/* Desktop Collapsed Strip */}
+          {!isActivityOpen && (
+            <div className="hidden lg:flex flex-col items-center py-2 gap-4 bg-muted/30 rounded-lg border h-full min-h-[200px]">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-muted"
+                onClick={() => setIsActivityOpen(true)}
+                title="Expand Activity"
+              >
+                <IconChevronLeft className="h-4 w-4" />
+              </Button>
+              <div
+                className="flex flex-col items-center gap-2 cursor-pointer py-4 flex-1 hover:text-primary transition-colors"
+                onClick={() => setIsActivityOpen(true)}
+              >
+                <IconHistory className="h-5 w-5" />
+                <span
+                  className="text-xs font-semibold uppercase tracking-widest text-muted-foreground select-none"
+                  style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+                >
+                  Recent Activity
+                </span>
               </div>
-            ) : recentTransactions.length === 0 ? (
-              <p className="text-muted-foreground text-sm py-4 text-center">
-                No transactions yet
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {recentTransactions.map((t: any) => (
-                  <div
-                    key={t._id}
-                    className="flex items-start justify-between gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors border sm:border-0"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">
-                        {t.book?.title || "Unknown Book"}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {t.student?.name}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {formatDistanceToNow(new Date(t.checkoutDate), { addSuffix: true })}
-                      </p>
-                    </div>
-                    <Badge
-                      variant={t.isReturned ? "secondary" : "default"}
-                      className="shrink-0 text-[10px] px-1.5 py-0"
-                    >
-                      {t.isReturned ? "In" : "Out"}
-                    </Badge>
+            </div>
+          )}
+
+          {/* Main Card Content */}
+          <Card className={`transition-all duration-300 ${!isActivityOpen ? "lg:hidden" : ""}`}>
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 px-4 cursor-pointer hover:bg-muted/50 transition-colors rounded-t-lg">
+                <CardTitle className="flex items-center justify-between text-base font-semibold">
+                  <div className="flex items-center gap-2">
+                    <IconHistory className="h-5 w-5 text-primary" />
+                    <span className="whitespace-nowrap">Recent Activity</span>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  <div>
+                    {/* Mobile Chevron */}
+                    <IconChevronDown
+                      className={`lg:hidden h-4 w-4 text-muted-foreground transition-transform duration-200 ${isActivityOpen ? "rotate-180" : ""
+                        }`}
+                    />
+                    {/* Desktop Chevron */}
+                    <IconChevronRight className="hidden lg:block h-4 w-4 text-muted-foreground" />
+                  </div>
+                </CardTitle>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
+              <CardContent className="px-4 pb-4">
+                {recentTransactions === undefined ? (
+                  <div className="flex items-center justify-center py-8">
+                    <IconLoader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : recentTransactions.length === 0 ? (
+                  <p className="text-muted-foreground text-sm py-4 text-center">
+                    No transactions yet
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {recentTransactions.map((t: any) => (
+                      <div
+                        key={t._id}
+                        className="flex items-start justify-between gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors border sm:border-0"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">
+                            {t.book?.title || "Unknown Book"}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {t.student?.name}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {formatDistanceToNow(new Date(t.checkoutDate), { addSuffix: true })}
+                          </p>
+                        </div>
+                        <Badge
+                          variant={t.isReturned ? "secondary" : "default"}
+                          className="shrink-0 text-[10px] px-1.5 py-0"
+                        >
+                          {t.isReturned ? "In" : "Out"}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       </div>
     </div>
   );
@@ -146,6 +206,7 @@ function CheckoutFlow() {
   const [bookAccession, setBookAccession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [overrideLimits, setOverrideLimits] = useState(false);
 
   const checkOut = useMutation(api.transactions.checkOut);
 
@@ -181,8 +242,8 @@ function CheckoutFlow() {
   }
   if (student && student.activeLoanCount >= student.borrowingLimit) {
     validationIssues.push({
-      type: "error",
-      message: `Borrowing limit reached (${student.activeLoanCount}/${student.borrowingLimit})`,
+      type: overrideLimits ? "warning" : "error",
+      message: `Borrowing limit reached (${student.activeLoanCount}/${student.borrowingLimit})${overrideLimits ? " - Override Active" : ""}`,
     });
   }
   if (book && book.status !== "available") {
@@ -204,6 +265,7 @@ function CheckoutFlow() {
         studentId: student._id as Id<"students">,
         bookId: book._id as Id<"books">,
         device: "admin_dashboard",
+        overrideLimits,
       });
 
       toast.success("Book checked out successfully!", {
@@ -226,6 +288,7 @@ function CheckoutFlow() {
   const handleReset = () => {
     setStudentId("");
     setBookAccession("");
+    setOverrideLimits(false);
   };
 
   return (
@@ -356,6 +419,24 @@ function CheckoutFlow() {
             </ul>
           </CardContent>
         </Card>
+      )}
+
+      {/* Override Option */}
+      {student && student.activeLoanCount >= student.borrowingLimit && (
+        <div className="flex items-center space-x-2 py-2">
+          <Checkbox
+            id="override-limit"
+            checked={overrideLimits}
+            onCheckedChange={(c: boolean) => setOverrideLimits(c)}
+            className="data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
+          />
+          <Label
+            htmlFor="override-limit"
+            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-amber-700"
+          >
+            Override borrowing limit
+          </Label>
+        </div>
       )}
 
       {/* Action Buttons */}

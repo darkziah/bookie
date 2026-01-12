@@ -6,12 +6,21 @@ import path from 'path'
 const host = process.env.TAURI_DEV_HOST
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react({
+      babel: {
+        plugins: [
+          ["babel-plugin-react-compiler", { target: "19" }],
+        ],
+      },
+    }),
+    tailwindcss()
+  ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
       '@/components/ui': path.resolve(__dirname, '../../packages/ui/src/components/ui'),
       '@/lib/utils': path.resolve(__dirname, '../../packages/ui/src/lib/utils'),
+      '@': path.resolve(__dirname, './src'),
       '@convex': path.resolve(__dirname, '../../convex'),
     },
   },

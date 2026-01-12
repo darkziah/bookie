@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { useForm, useStore } from "@tanstack/react-form";
+import { z } from "zod";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -46,6 +48,7 @@ import {
   IconBarcode,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
+import { BarcodeScanner } from "@/components/scanner/barcode-scanner";
 import type { Id } from "@convex/_generated/dataModel";
 
 export const Route = createFileRoute("/catalog")({
@@ -265,30 +268,93 @@ function BookRow({ book }: { book: any }) {
   );
 }
 
+const addBookSchema = z.object({
+  accessionNumber: z.string(),
+  title: z.string().min(1, "Title is required"),
+  author: z.string().min(1, "Author is required"),
+  isbn: z.string(),
+  category: z.string(),
+  publisher: z.string(),
+  publishYear: z.string(),
+  replacementCost: z.string(),
+  location: z.string(),
+  pages: z.string(),
+  coverUrl: z.string(),
+});
+
 function AddBookDialog({ onClose }: { onClose: () => void }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string>("");
-  const [formData, setFormData] = useState({
-    accessionNumber: "",
-    title: "",
-    author: "",
-    isbn: "",
-    category: "",
-    publisher: "",
-    publishYear: "",
-    copies: "1",
-    replacementCost: "",
-    location: "",
-    pages: "",
-    coverUrl: "",
-  });
 
   const createBook = useMutation(api.books.create);
   const nextAccession = useQuery(api.books.getNextAccessionNumber, {});
   const generateUploadUrl = useMutation(api.books.generateUploadUrl);
+
+  const form = useForm({
+    defaultValues: {
+      accessionNumber: "",
+      title: "",
+      author: "",
+      isbn: "",
+      category: "general",
+      publisher: "",
+      publishYear: "",
+      replacementCost: "500",
+      location: "",
+      pages: "",
+      coverUrl: "",
+    },
+    validators: {
+      onChange: addBookSchema,
+    },
+    onSubmit: async ({ value }) => {
+      try {
+        setIsLoading(true);
+
+        // Upload cover image if selected
+        let coverStorageId: string | undefined;
+        if (coverFile) {
+          setIsUploading(true);
+          const uploadUrl = await generateUploadUrl();
+          const result = await fetch(uploadUrl, {
+            method: "POST",
+            headers: { "Content-Type": coverFile.type },
+            body: coverFile,
+          });
+          const { storageId } = await result.json();
+          coverStorageId = storageId;
+          setIsUploading(false);
+        }
+
+        await createBook({
+          accessionNumber: value.accessionNumber || nextAccession || "",
+          title: value.title,
+          author: value.author,
+          isbn: value.isbn || undefined,
+          category: value.category || "general",
+          publisher: value.publisher || undefined,
+          publicationYear: value.publishYear
+            ? Number(value.publishYear)
+            : undefined,
+          replacementCost: value.replacementCost
+            ? Number(value.replacementCost)
+            : 500,
+          location: value.location || "General",
+          pages: value.pages ? Number(value.pages) : undefined,
+          condition: "good",
+        });
+        toast.success("Book added successfully!");
+        onClose();
+      } catch (error: any) {
+        toast.error("Failed to add book", { description: error.message });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+  });
 
   const handleCoverUpload = async (file: File) => {
     setCoverFile(file);
@@ -298,18 +364,22 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
     reader.readAsDataURL(file);
   };
 
-  const handleIsbnLookup = async () => {
-    if (!formData.isbn || formData.isbn.length < 10) {
+  const currentIsbn = useStore(form.store, (state) => state.values.isbn);
+  const currentCoverUrl = useStore(form.store, (state) => state.values.coverUrl);
+
+  const handleIsbnLookup = async (isbnOverride?: string) => {
+    const isbn = isbnOverride || currentIsbn;
+    if (!isbn || isbn.length < 10) {
       toast.error("Please enter a valid ISBN (10 or 13 digits)");
       return;
     }
 
     setIsLookingUp(true);
     try {
-      const { lookupIsbn, normalizeIsbn, isValidIsbn } = await import(
+      const { lookupIsbn, normalizeIsbn, isValidIsbn, mapSubjectsToCategory } = await import(
         "@/lib/isbn-lookup"
       );
-      const normalized = normalizeIsbn(formData.isbn);
+      const normalized = normalizeIsbn(isbn);
 
       if (!isValidIsbn(normalized)) {
         toast.error("Invalid ISBN format");
@@ -325,69 +395,24 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
         return;
       }
 
-      setFormData((prev) => ({
-        ...prev,
-        title: metadata.title || prev.title,
-        author: metadata.author || prev.author,
-        publisher: metadata.publisher || prev.publisher,
-        publishYear: metadata.publicationYear?.toString() || prev.publishYear,
-        pages: metadata.pages?.toString() || prev.pages,
-        coverUrl: metadata.coverUrl || prev.coverUrl,
-      }));
+      const category = mapSubjectsToCategory(metadata.subjects);
+
+      form.setFieldValue("isbn", normalized);
+      if (metadata.title) form.setFieldValue("title", metadata.title);
+      if (metadata.author) form.setFieldValue("author", metadata.author);
+      if (metadata.publisher) form.setFieldValue("publisher", metadata.publisher);
+      if (metadata.publicationYear) form.setFieldValue("publishYear", metadata.publicationYear.toString());
+      if (metadata.pages) form.setFieldValue("pages", metadata.pages.toString());
+      if (metadata.coverUrl) form.setFieldValue("coverUrl", metadata.coverUrl);
+      if (category) form.setFieldValue("category", category);
 
       toast.success("Book found!", {
-        description: `"${metadata.title}" by ${metadata.author}`,
+        description: `"${metadata.title}" by ${metadata.author}${category ? ` (${category})` : ""}`,
       });
     } catch (error: any) {
       toast.error("Lookup failed", { description: error.message });
     } finally {
       setIsLookingUp(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setIsLoading(true);
-
-      // Upload cover image if selected
-      let coverStorageId: string | undefined;
-      if (coverFile) {
-        setIsUploading(true);
-        const uploadUrl = await generateUploadUrl();
-        const result = await fetch(uploadUrl, {
-          method: "POST",
-          headers: { "Content-Type": coverFile.type },
-          body: coverFile,
-        });
-        const { storageId } = await result.json();
-        coverStorageId = storageId;
-        setIsUploading(false);
-      }
-
-      await createBook({
-        accessionNumber: formData.accessionNumber || nextAccession || "",
-        title: formData.title,
-        author: formData.author,
-        isbn: formData.isbn || undefined,
-        category: formData.category || "general",
-        publisher: formData.publisher || undefined,
-        publicationYear: formData.publishYear
-          ? Number(formData.publishYear)
-          : undefined,
-        replacementCost: formData.replacementCost
-          ? Number(formData.replacementCost)
-          : 500,
-        location: formData.location || "General",
-        pages: formData.pages ? Number(formData.pages) : undefined,
-        condition: "good",
-      });
-      toast.success("Book added successfully!");
-      onClose();
-    } catch (error: any) {
-      toast.error("Failed to add book", { description: error.message });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -399,42 +424,55 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
           Enter book details or scan ISBN to auto-fill.
         </DialogDescription>
       </DialogHeader>
-      <form onSubmit={handleSubmit}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          form.handleSubmit();
+        }}
+      >
         <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto px-1">
           {/* ISBN Lookup Section */}
-          <div className="bg-muted/50 rounded-lg p-4 border">
-            <Label className="text-sm font-medium mb-2 block">
+          <div className="bg-muted/50 rounded-lg p-4 border space-y-3">
+            <Label className="text-sm font-medium block">
               Quick ISBN Lookup
             </Label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Input
-                placeholder="Enter ISBN (10 or 13 digits)"
-                value={formData.isbn}
-                onChange={(e) =>
-                  setFormData({ ...formData, isbn: e.target.value })
-                }
-                className="flex-1"
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleIsbnLookup}
-                disabled={isLookingUp || !formData.isbn}
-              >
-                {isLookingUp ? (
-                  <IconLoader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    <IconSearch className="h-4 w-4 mr-1" />
-                    Lookup
-                  </>
-                )}
-              </Button>
-            </div>
-            {(formData.coverUrl || coverPreview) && (
+            <BarcodeScanner
+              onScan={(code) => {
+                form.setFieldValue("isbn", code);
+                handleIsbnLookup(code);
+              }}
+              placeholder="Scan or enter ISBN..."
+              scanButtonLabel="Scan ISBN"
+              className="w-full"
+            />
+            {currentIsbn && !isLookingUp && (
+              <div className="flex items-center justify-between px-3 py-2 bg-background/50 rounded-md border border-dashed">
+                <div className="text-xs">
+                  <span className="text-muted-foreground mr-2">Set ISBN:</span>
+                  <span className="font-mono font-medium">{currentIsbn}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs text-red-500 hover:text-red-600 hover:bg-red-50/50"
+                  onClick={() => form.setFieldValue("isbn", "")}
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+            {isLookingUp && (
+              <div className="flex items-center justify-center py-2 gap-2 text-sm text-muted-foreground">
+                <IconLoader2 className="h-4 w-4 animate-spin" />
+                Looking up book details...
+              </div>
+            )}
+            {(currentCoverUrl || coverPreview) && (
               <div className="mt-3 flex items-center gap-3">
                 <img
-                  src={coverPreview || formData.coverUrl}
+                  src={coverPreview || currentCoverUrl}
                   alt="Book cover"
                   className="w-16 h-24 object-cover rounded shadow"
                   onError={(e) => {
@@ -468,214 +506,286 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="accession">Accession Number</Label>
-              <div className="flex gap-2">
+            <form.Field
+              name="accessionNumber"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Accession Number</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      placeholder={nextAccession || "Auto-generated"}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() =>
+                        field.handleChange(nextAccession || "")
+                      }
+                    >
+                      <IconBarcode className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            />
+            <form.Field
+              name="pages"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Pages</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    placeholder="e.g., 320"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
+          </div>
+
+          <form.Field
+            name="title"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Title *</Label>
                 <Input
-                  id="accession"
-                  placeholder={nextAccession || "Auto-generated"}
-                  value={formData.accessionNumber}
-                  onChange={(e) =>
-                    setFormData({ ...formData, accessionNumber: e.target.value })
-                  }
+                  id={field.name}
+                  name={field.name}
+                  placeholder="Book title"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  required
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={() =>
-                    setFormData({
-                      ...formData,
-                      accessionNumber: nextAccession || "",
-                    })
-                  }
-                >
-                  <IconBarcode className="h-4 w-4" />
-                </Button>
+                {field.state.meta.errors ? (
+                  <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                ) : null}
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pages">Pages</Label>
-              <Input
-                id="pages"
-                type="number"
-                placeholder="e.g., 320"
-                value={formData.pages}
-                onChange={(e) =>
-                  setFormData({ ...formData, pages: e.target.value })
-                }
-              />
-            </div>
-          </div>
+            )}
+          />
 
-          <div className="space-y-2">
-            <Label htmlFor="title">Title *</Label>
-            <Input
-              id="title"
-              placeholder="Book title"
-              value={formData.title}
-              onChange={(e) =>
-                setFormData({ ...formData, title: e.target.value })
-              }
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="author">Author *</Label>
-            <Input
-              id="author"
-              placeholder="Author name"
-              value={formData.author}
-              onChange={(e) =>
-                setFormData({ ...formData, author: e.target.value })
-              }
-              required
-            />
-          </div>
+          <form.Field
+            name="author"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Author *</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  placeholder="Author name"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  required
+                />
+                {field.state.meta.errors ? (
+                  <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                ) : null}
+              </div>
+            )}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select
-                value={formData.category}
-                onValueChange={(v) => setFormData({ ...formData, category: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fiction">Fiction</SelectItem>
-                  <SelectItem value="non-fiction">Non-Fiction</SelectItem>
-                  <SelectItem value="reference">Reference</SelectItem>
-                  <SelectItem value="textbook">Textbook</SelectItem>
-                  <SelectItem value="periodical">Periodical</SelectItem>
-                  <SelectItem value="children">Children's</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="publisher">Publisher</Label>
-              <Input
-                id="publisher"
-                placeholder="Publisher name"
-                value={formData.publisher}
-                onChange={(e) =>
-                  setFormData({ ...formData, publisher: e.target.value })
-                }
-              />
-            </div>
+            <form.Field
+              name="category"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Category</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v)}
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fiction">Fiction</SelectItem>
+                      <SelectItem value="non-fiction">Non-Fiction</SelectItem>
+                      <SelectItem value="reference">Reference</SelectItem>
+                      <SelectItem value="textbook">Textbook</SelectItem>
+                      <SelectItem value="periodical">Periodical</SelectItem>
+                      <SelectItem value="children">Children's</SelectItem>
+                      <SelectItem value="general">General</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+            <form.Field
+              name="publisher"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Publisher</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    placeholder="Publisher name"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="year">Year</Label>
-              <Input
-                id="year"
-                type="number"
-                placeholder="2024"
-                value={formData.publishYear}
-                onChange={(e) =>
-                  setFormData({ ...formData, publishYear: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost">Cost (₱)</Label>
-              <Input
-                id="cost"
-                type="number"
-                placeholder="500"
-                value={formData.replacementCost}
-                onChange={(e) =>
-                  setFormData({ ...formData, replacementCost: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2 col-span-2 sm:col-span-1">
-              <Label htmlFor="location">Location</Label>
-              <Input
-                id="location"
-                placeholder="Shelf A-3"
-                value={formData.location}
-                onChange={(e) =>
-                  setFormData({ ...formData, location: e.target.value })
-                }
-              />
-            </div>
+            <form.Field
+              name="publishYear"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Year</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    placeholder="2024"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="replacementCost"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Cost (₱)</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    placeholder="500"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="location"
+              children={(field) => (
+                <div className="space-y-2 col-span-2 sm:col-span-1">
+                  <Label htmlFor={field.name}>Location</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    placeholder="Shelf A-3"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
           </div>
         </div>
         <DialogFooter className="gap-2 sm:gap-0 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto">
             Cancel
           </Button>
-          <Button
-            type="submit"
-            disabled={isLoading || !formData.title || !formData.author}
-            className="w-full sm:w-auto"
-          >
-            {isLoading ? (
-              <>
-                <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                Adding...
-              </>
-            ) : (
-              "Add Book"
+          <form.Subscribe
+            selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+            children={([canSubmit, isSubmitting]) => (
+              <Button
+                type="submit"
+                disabled={isLoading || isSubmitting || !canSubmit}
+                className="w-full sm:w-auto"
+              >
+                {isLoading || isSubmitting ? (
+                  <>
+                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  "Add Book"
+                )}
+              </Button>
             )}
-          </Button>
+          />
         </DialogFooter>
       </form>
-    </DialogContent>
+    </DialogContent >
   );
 }
 
+const editBookSchema = z.object({
+  title: z.string().min(1, "Title is required"),
+  author: z.string().min(1, "Author is required"),
+  isbn: z.string(),
+  category: z.string(),
+  publisher: z.string(),
+  publishYear: z.string(),
+  replacementCost: z.string(),
+  location: z.string(),
+  status: z.string(),
+  condition: z.string(),
+  pages: z.string(),
+});
+
 function EditBookDialog({ book, onClose }: { book: any; onClose: () => void }) {
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    title: book.title,
-    author: book.author,
-    isbn: book.isbn || "",
-    category: book.category || "",
-    publisher: book.publisher || "",
-    publishYear: book.publishYear ? String(book.publishYear) : "",
-    replacementCost: book.replacementCost ? String(book.replacementCost) : "",
-    location: book.location || "",
-    status: book.status,
-    condition: book.condition || "good",
-  });
-
   const updateBook = useMutation(api.books.update);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setIsLoading(true);
-      await updateBook({
-        id: book._id as Id<"books">,
-        title: formData.title,
-        author: formData.author,
-        isbn: formData.isbn || undefined,
-        category: formData.category || undefined,
-        publisher: formData.publisher || undefined,
-        publicationYear: formData.publishYear
-          ? Number(formData.publishYear)
-          : undefined,
-        replacementCost: formData.replacementCost
-          ? Number(formData.replacementCost)
-          : undefined,
-        location: formData.location || undefined,
-        condition: formData.condition as any,
-      });
-      toast.success("Book updated successfully!");
-      onClose();
-    } catch (error: any) {
-      toast.error("Failed to update book", { description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const form = useForm({
+    defaultValues: {
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn || "",
+      category: book.category || "general",
+      publisher: book.publisher || "",
+      publishYear: book.publicationYear ? String(book.publicationYear) : "",
+      replacementCost: book.replacementCost ? String(book.replacementCost) : "",
+      location: book.location || "",
+      status: book.status,
+      condition: book.condition || "good",
+      pages: book.pages ? String(book.pages) : "",
+    },
+    validators: {
+      onChange: editBookSchema,
+    },
+    onSubmit: async ({ value }) => {
+      try {
+        setIsLoading(true);
+        await updateBook({
+          id: book._id as Id<"books">,
+          title: value.title,
+          author: value.author,
+          isbn: value.isbn || undefined,
+          category: value.category || undefined,
+          publisher: value.publisher || undefined,
+          publicationYear: value.publishYear
+            ? Number(value.publishYear)
+            : undefined,
+          replacementCost: value.replacementCost
+            ? Number(value.replacementCost)
+            : undefined,
+          location: value.location || undefined,
+          condition: value.condition as any,
+          pages: value.pages ? Number(value.pages) : undefined,
+        });
+        toast.success("Book updated successfully!");
+        onClose();
+      } catch (error: any) {
+        toast.error("Failed to update book", { description: error.message });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+  });
 
   return (
     <DialogContent className="max-w-2xl w-[95vw] sm:w-full">
@@ -683,7 +793,13 @@ function EditBookDialog({ book, onClose }: { book: any; onClose: () => void }) {
         <DialogTitle>Edit Book</DialogTitle>
         <DialogDescription>Update details for {book.title}</DialogDescription>
       </DialogHeader>
-      <form onSubmit={handleSubmit}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          form.handleSubmit();
+        }}
+      >
         <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto px-1">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -694,129 +810,239 @@ function EditBookDialog({ book, onClose }: { book: any; onClose: () => void }) {
                 className="bg-muted"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="isbn">ISBN</Label>
-              <Input
-                id="isbn"
-                value={formData.isbn}
-                onChange={(e) =>
-                  setFormData({ ...formData, isbn: e.target.value })
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="title">Title *</Label>
-            <Input
-              id="title"
-              value={formData.title}
-              onChange={(e) =>
-                setFormData({ ...formData, title: e.target.value })
-              }
-              required
+            <form.Field
+              name="pages"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Pages</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    placeholder="e.g., 320"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
             />
           </div>
+          <form.Field
+            name="isbn"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>ISBN</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+              </div>
+            )}
+          />
 
-          <div className="space-y-2">
-            <Label htmlFor="author">Author *</Label>
-            <Input
-              id="author"
-              value={formData.author}
-              onChange={(e) =>
-                setFormData({ ...formData, author: e.target.value })
-              }
-              required
+          <form.Field
+            name="title"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Title *</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+          />
+
+          <form.Field
+            name="author"
+            children={(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>Author *</Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <form.Field
+              name="category"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Category</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v)}
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fiction">Fiction</SelectItem>
+                      <SelectItem value="non-fiction">Non-Fiction</SelectItem>
+                      <SelectItem value="reference">Reference</SelectItem>
+                      <SelectItem value="textbook">Textbook</SelectItem>
+                      <SelectItem value="periodical">Periodical</SelectItem>
+                      <SelectItem value="children">Children's</SelectItem>
+                      <SelectItem value="general">General</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+            <form.Field
+              name="publisher"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Publisher</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    placeholder="Publisher name"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(v) => setFormData({ ...formData, status: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="available">Available</SelectItem>
-                  <SelectItem value="borrowed">Borrowed</SelectItem>
-                  <SelectItem value="lost">Lost</SelectItem>
-                  <SelectItem value="damaged">Damaged</SelectItem>
-                  <SelectItem value="weeded">Weeded</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="condition">Condition</Label>
-              <Select
-                value={formData.condition}
-                onValueChange={(v) => setFormData({ ...formData, condition: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="excellent">Excellent</SelectItem>
-                  <SelectItem value="good">Good</SelectItem>
-                  <SelectItem value="fair">Fair</SelectItem>
-                  <SelectItem value="poor">Poor</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <form.Field
+              name="status"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Status</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v)}
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="available">Available</SelectItem>
+                      <SelectItem value="borrowed">Borrowed</SelectItem>
+                      <SelectItem value="lost">Lost</SelectItem>
+                      <SelectItem value="damaged">Damaged</SelectItem>
+                      <SelectItem value="weeded">Weeded</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+            <form.Field
+              name="condition"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Condition</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v)}
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="excellent">Excellent</SelectItem>
+                      <SelectItem value="good">Good</SelectItem>
+                      <SelectItem value="fair">Fair</SelectItem>
+                      <SelectItem value="poor">Poor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="year">Year</Label>
-              <Input
-                id="year"
-                type="number"
-                value={formData.publishYear}
-                onChange={(e) =>
-                  setFormData({ ...formData, publishYear: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost">Cost (₱)</Label>
-              <Input
-                id="cost"
-                type="number"
-                value={formData.replacementCost}
-                onChange={(e) =>
-                  setFormData({ ...formData, replacementCost: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2 col-span-2 sm:col-span-1">
-              <Label htmlFor="location">Location</Label>
-              <Input
-                id="location"
-                value={formData.location}
-                onChange={(e) =>
-                  setFormData({ ...formData, location: e.target.value })
-                }
-              />
-            </div>
+            <form.Field
+              name="publishYear"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Year</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="replacementCost"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name}>Cost (₱)</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
+            <form.Field
+              name="location"
+              children={(field) => (
+                <div className="space-y-2 col-span-2 sm:col-span-1">
+                  <Label htmlFor={field.name}>Location</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                  />
+                </div>
+              )}
+            />
           </div>
         </div>
         <DialogFooter className="gap-2 sm:gap-0 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto">
             Cancel
           </Button>
-          <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
-            {isLoading ? (
-              <>
-                <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Save Changes"
+          <form.Subscribe
+            selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+            children={([canSubmit, isSubmitting]) => (
+              <Button
+                type="submit"
+                disabled={isLoading || isSubmitting || !canSubmit}
+                className="w-full sm:w-auto"
+              >
+                {isLoading || isSubmitting ? (
+                  <>
+                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Changes"
+                )}
+              </Button>
             )}
-          </Button>
+          />
         </DialogFooter>
       </form>
     </DialogContent>

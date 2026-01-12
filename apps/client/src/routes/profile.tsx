@@ -1,5 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { createFileRoute } from "@tanstack/react-router"
+import { useState, useEffect, useMemo } from "react";
+import { useForm, useStore } from "@tanstack/react-form";
+import { z } from "zod";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { AuthGuard } from "@/components/layout/auth-guard";
@@ -37,11 +39,15 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 
-export const Route = createFileRoute("/profile")(
-  {
-    component: ProfilePage,
-  }
-);
+const profileSchema = z.object({
+  name: z.string().min(1, "Full name is required"),
+  employeeId: z.string(),
+  phone: z.string(),
+});
+
+export const Route = createFileRoute("/profile")({
+  component: ProfilePage,
+});
 
 function ProfilePage() {
   return (
@@ -62,49 +68,48 @@ function ProfileContent() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    employeeId: "",
-    phone: "",
+
+  const form = useForm({
+    defaultValues: {
+      name: librarian?.name || "",
+      employeeId: librarian?.employeeId || "",
+      phone: librarian?.phone || "",
+    },
+    validators: {
+      onChange: profileSchema,
+    },
+    onSubmit: async ({ value }) => {
+      if (!librarian) return;
+      setIsSaving(true);
+      try {
+        await updateProfile({
+          name: value.name,
+          employeeId: value.employeeId || undefined,
+          phone: value.phone || undefined,
+        });
+        toast.success("Profile updated successfully!");
+        setIsEditing(false);
+      } catch (error: any) {
+        toast.error("Failed to update profile", { description: error.message });
+      } finally {
+        setIsSaving(false);
+      }
+    },
   });
 
+  // Re-sync form when librarian data changes and not editing
   useEffect(() => {
-    if (librarian) {
-      setFormData({
+    if (librarian && !isEditing) {
+      form.reset({
         name: librarian.name || "",
         employeeId: librarian.employeeId || "",
         phone: librarian.phone || "",
       });
     }
-  }, [librarian]);
-
-  const handleSave = async () => {
-    if (!librarian) return;
-
-    setIsSaving(true);
-    try {
-      await updateProfile({
-        name: formData.name,
-        employeeId: formData.employeeId || undefined,
-        phone: formData.phone || undefined,
-      });
-      toast.success("Profile updated successfully!");
-      setIsEditing(false);
-    } catch (error: any) {
-      toast.error("Failed to update profile", { description: error.message });
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  }, [librarian, isEditing, form]);
 
   const handleCancel = () => {
-    if (librarian) {
-      setFormData({
-        name: librarian.name || "",
-        employeeId: librarian.employeeId || "",
-        phone: librarian.phone || "",
-      });
-    }
+    form.reset();
     setIsEditing(false);
   };
 
@@ -168,14 +173,22 @@ function ProfileContent() {
               <IconX className="mr-2 h-4 w-4" />
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <IconDeviceFloppy className="mr-2 h-4 w-4" />
+            <form.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+              children={([canSubmit, isSubmitting]) => (
+                <Button
+                  onClick={() => form.handleSubmit()}
+                  disabled={isSaving || isSubmitting || !canSubmit}
+                >
+                  {isSaving || isSubmitting ? (
+                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <IconDeviceFloppy className="mr-2 h-4 w-4" />
+                  )}
+                  Save Changes
+                </Button>
               )}
-              Save Changes
-            </Button>
+            />
           </div>
         )}
       </div>
@@ -239,13 +252,18 @@ function ProfileContent() {
                 Full Name
               </Label>
               {isEditing ? (
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  placeholder="Enter your full name"
+                <form.Field
+                  name="name"
+                  children={(field) => (
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Enter your full name"
+                    />
+                  )}
                 />
               ) : (
                 <p className="text-lg font-medium">{librarian.name}</p>
@@ -261,13 +279,18 @@ function ProfileContent() {
                 Employee ID
               </Label>
               {isEditing ? (
-                <Input
-                  id="employeeId"
-                  value={formData.employeeId}
-                  onChange={(e) =>
-                    setFormData({ ...formData, employeeId: e.target.value })
-                  }
-                  placeholder="Enter employee ID"
+                <form.Field
+                  name="employeeId"
+                  children={(field) => (
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Enter employee ID"
+                    />
+                  )}
                 />
               ) : (
                 <p className="text-lg font-medium">
@@ -289,13 +312,18 @@ function ProfileContent() {
                 Phone Number
               </Label>
               {isEditing ? (
-                <Input
-                  id="phone"
-                  value={formData.phone}
-                  onChange={(e) =>
-                    setFormData({ ...formData, phone: e.target.value })
-                  }
-                  placeholder="Enter phone number"
+                <form.Field
+                  name="phone"
+                  children={(field) => (
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Enter phone number"
+                    />
+                  )}
                 />
               ) : (
                 <p className="text-lg font-medium">

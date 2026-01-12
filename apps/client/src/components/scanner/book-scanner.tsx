@@ -1,4 +1,3 @@
-import { Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { BarcodeScanner } from "./barcode-scanner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@bookie/ui/components/ui/card";
 import { IconBook } from "@tabler/icons-react";
@@ -9,17 +8,6 @@ interface BookScannerProps {
   className?: string;
   mode?: "accession" | "isbn";
 }
-
-const BOOK_FORMATS = [
-  Html5QrcodeSupportedFormats.EAN_13, // ISBN barcodes
-  Html5QrcodeSupportedFormats.EAN_8,
-  Html5QrcodeSupportedFormats.CODE_128,
-  Html5QrcodeSupportedFormats.CODE_39,
-  Html5QrcodeSupportedFormats.CODE_93,
-  Html5QrcodeSupportedFormats.ITF,
-  Html5QrcodeSupportedFormats.QR_CODE,
-  Html5QrcodeSupportedFormats.UPC_A,
-];
 
 export function BookScanner({
   onScan,
@@ -48,7 +36,6 @@ export function BookScanner({
           onScan={onScan}
           onError={onError}
           placeholder={isIsbnMode ? "Enter ISBN (e.g., 9781234567890)" : "Enter Accession No. (e.g., B-2024-0001)"}
-          supportedFormats={BOOK_FORMATS}
           scanButtonLabel={isIsbnMode ? "Scan ISBN" : "Scan Book"}
         />
       </CardContent>

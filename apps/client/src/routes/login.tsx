@@ -15,6 +15,8 @@ import {
 } from "@bookie/ui/components/ui/card";
 import { IconBook, IconLoader2, IconAlertCircle, IconMail, IconShieldCheck } from "@tabler/icons-react";
 import { toast } from "sonner";
+import { useForm, useStore } from "@tanstack/react-form";
+import { z } from "zod";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -38,15 +40,54 @@ function UnauthorizedSignOut() {
   );
 }
 
+const loginSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
 function LoginPage() {
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const { signIn } = useAuthActions();
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
+
+  const form = useForm({
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+    validators: {
+      onChange: loginSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setIsLoading(true);
+      try {
+        // For signup, check if invite exists first (unless system is in setup mode)
+        if (isSignUp && !pendingInvite && !systemRequiresSetup) {
+          toast.error("No invitation found for this email", {
+            description: "Please contact an administrator for an invitation.",
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        await signIn("password", {
+          email: value.email,
+          password: value.password,
+          ...(isSignUp ? { flow: "signUp" } : { flow: "signIn" }),
+        });
+
+        toast.success(isSignUp ? "Account created!" : "Welcome back!");
+      } catch (error: any) {
+        toast.error(error.message || "Authentication failed");
+      } finally {
+        setIsLoading(false);
+      }
+    },
   });
+
+  // Watch email for invite check
+  const emailValue = useStore(form.store, (state) => state.values.email);
 
   // Check if current user has a librarian record
   const currentLibrarian = useQuery(
@@ -60,7 +101,7 @@ function LoginPage() {
   // Check for pending invite (for signup flow)
   const pendingInvite = useQuery(
     api.librarians.checkInvite,
-    isSignUp && formData.email ? { email: formData.email } : "skip"
+    isSignUp && emailValue ? { email: emailValue } : "skip"
   );
 
   const acceptInvite = useMutation(api.librarians.acceptInvite);
@@ -68,9 +109,9 @@ function LoginPage() {
   // Auto-accept invite after authentication (for invited users)
   useEffect(() => {
     async function handlePostAuth() {
-      if (isAuthenticated && currentLibrarian === null && formData.email && !systemRequiresSetup) {
+      if (isAuthenticated && currentLibrarian === null && emailValue && !systemRequiresSetup) {
         try {
-          await acceptInvite({ email: formData.email });
+          await acceptInvite({ email: emailValue });
           toast.success("Welcome to the team!");
         } catch {
           // Invite failure will be handled by UI states below
@@ -78,7 +119,7 @@ function LoginPage() {
       }
     }
     handlePostAuth();
-  }, [isAuthenticated, currentLibrarian, formData.email, acceptInvite, systemRequiresSetup]);
+  }, [isAuthenticated, currentLibrarian, emailValue, acceptInvite, systemRequiresSetup]);
 
   // Redirect if system needs setup and user is authenticated
   if (!authLoading && systemRequiresSetup === true && isAuthenticated) {
@@ -127,7 +168,7 @@ function LoginPage() {
           <CardContent className="space-y-4">
             <div className="p-4 bg-muted rounded-lg text-center">
               <p className="text-sm text-muted-foreground">
-                Logged in as: <span className="font-medium text-foreground">{formData.email || "Unknown"}</span>
+                Logged in as: <span className="font-medium text-foreground">{emailValue || "Unknown"}</span>
               </p>
             </div>
             <UnauthorizedSignOut />
@@ -136,34 +177,6 @@ function LoginPage() {
       </div>
     );
   }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    try {
-      // For signup, check if invite exists first (unless system is in setup mode)
-      if (isSignUp && !pendingInvite && !systemRequiresSetup) {
-        toast.error("No invitation found for this email", {
-          description: "Please contact an administrator for an invitation.",
-        });
-        setIsLoading(false);
-        return;
-      }
-
-      await signIn("password", {
-        email: formData.email,
-        password: formData.password,
-        ...(isSignUp ? { flow: "signUp" } : { flow: "signIn" }),
-      });
-
-      toast.success(isSignUp ? "Account created!" : "Welcome back!");
-    } catch (error: any) {
-      toast.error(error.message || "Authentication failed");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 p-4">
@@ -192,80 +205,108 @@ function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="Enter your email"
-                  value={formData.email}
-                  onChange={(e) =>
-                    setFormData({ ...formData, email: e.target.value })
-                  }
-                  required
-                  disabled={isLoading}
-                />
-                {/* Show invite status for signup */}
-                {isSignUp && formData.email && formData.email.includes("@") && !systemRequiresSetup && (
-                  <div className="text-xs mt-1">
-                    {pendingInvite === undefined ? (
-                      <span className="text-muted-foreground flex items-center gap-1">
-                        <IconLoader2 className="h-3 w-3 animate-spin" />
-                        Checking invitation status...
-                      </span>
-                    ) : pendingInvite ? (
-                      <span className="text-green-600 flex items-center gap-1">
-                        <IconMail className="h-3 w-3" />
-                        Invitation found! You'll join as {pendingInvite.role.replace("_", " ")}.
-                      </span>
-                    ) : (
-                      <span className="text-destructive flex items-center gap-1">
-                        <IconAlertCircle className="h-3 w-3" />
-                        No invitation found. Contact an administrator.
-                      </span>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                form.handleSubmit();
+              }}
+              className="space-y-4"
+            >
+              <form.Field
+                name="email"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name}>Email</Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      type="email"
+                      placeholder="Enter your email"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      required
+                      disabled={isLoading}
+                    />
+                    {field.state.meta.errors ? (
+                      <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                    ) : null}
+                    {/* Show invite status for signup */}
+                    {isSignUp && field.state.value && field.state.value.includes("@") && !systemRequiresSetup && (
+                      <div className="text-xs mt-1">
+                        {pendingInvite === undefined ? (
+                          <span className="text-muted-foreground flex items-center gap-1">
+                            <IconLoader2 className="h-3 w-3 animate-spin" />
+                            Checking invitation status...
+                          </span>
+                        ) : pendingInvite ? (
+                          <span className="text-green-600 flex items-center gap-1">
+                            <IconMail className="h-3 w-3" />
+                            Invitation found! You'll join as {pendingInvite.role.replace("_", " ")}.
+                          </span>
+                        ) : (
+                          <span className="text-destructive flex items-center gap-1">
+                            <IconAlertCircle className="h-3 w-3" />
+                            No invitation found. Contact an administrator.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {isSignUp && systemRequiresSetup && (
+                      <div className="text-xs mt-1 text-blue-600 flex items-center gap-1">
+                        <IconShieldCheck className="h-3 w-3" />
+                        First admin setup detected. No invite required.
+                      </div>
                     )}
                   </div>
                 )}
-                {isSignUp && systemRequiresSetup && (
-                  <div className="text-xs mt-1 text-blue-600 flex items-center gap-1">
-                    <IconShieldCheck className="h-3 w-3" />
-                    First admin setup detected. No invite required.
+              />
+              <form.Field
+                name="password"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name}>Password</Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      type="password"
+                      placeholder="Enter your password"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      required
+                      disabled={isLoading}
+                      minLength={8}
+                    />
+                    {field.state.meta.errors ? (
+                      <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                    ) : null}
                   </div>
                 )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Enter your password"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
-                  required
-                  disabled={isLoading}
-                  minLength={8}
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full"
-                size="lg"
-                disabled={isLoading || (isSignUp && !pendingInvite && formData.email.includes("@") && pendingInvite !== undefined && !systemRequiresSetup)}
-              >
-                {isLoading ? (
-                  <>
-                    <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {isSignUp ? "Creating account..." : "Signing in..."}
-                  </>
-                ) : isSignUp ? (
-                  "Create Account"
-                ) : (
-                  "Sign In"
+              />
+              <form.Subscribe
+                selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+                children={([canSubmit, isSubmitting]) => (
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    size="lg"
+                    disabled={isLoading || (isSignUp && !pendingInvite && emailValue.includes("@") && pendingInvite !== undefined && !systemRequiresSetup) || !canSubmit || isSubmitting}
+                  >
+                    {isLoading || isSubmitting ? (
+                      <>
+                        <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {isSignUp ? "Creating account..." : "Signing in..."}
+                      </>
+                    ) : isSignUp ? (
+                      "Create Account"
+                    ) : (
+                      "Sign In"
+                    )}
+                  </Button>
                 )}
-              </Button>
+              />
             </form>
 
             <div className="mt-6 text-center">

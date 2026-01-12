@@ -13,6 +13,30 @@ import type { Doc, Id } from "./_generated/dataModel";
  * - No access to sensitive data like guardian phone numbers
  */
 
+// Get public settings for kiosk display (no auth required)
+export const getKioskSettings = query({
+  args: {},
+  handler: async (ctx) => {
+    const settings = await ctx.db.query("settings").collect();
+
+    // Only return public/kiosk-relevant settings
+    const publicKeys = ["schoolName", "libraryName", "kioskTimeout"];
+    const result: Record<string, any> = {};
+
+    for (const setting of settings) {
+      if (publicKeys.includes(setting.key)) {
+        result[setting.key] = setting.value;
+      }
+    }
+
+    return {
+      schoolName: result.schoolName ?? "School Library",
+      libraryName: result.libraryName ?? "Library Management System",
+      kioskTimeout: result.kioskTimeout ?? 30,
+    };
+  },
+});
+
 // Calculate due date excluding weekends and holidays
 async function calculateDueDate(ctx: any, borrowingDays: number): Promise<number> {
   const holidays = await ctx.db.query("holidays").collect();
@@ -120,11 +144,202 @@ export const getBookByAccession = query({
   },
 });
 
+// Get book by code (accession number or ISBN) - KIOSK VERSION (no auth required)
+// This is the primary lookup for the kiosk scanner - returns single book for accession
+export const getBookByCode = query({
+  args: { code: v.string() },
+  handler: async (ctx, args) => {
+    const code = args.code.trim();
+
+    // First try by accession number (exact match)
+    let book = await ctx.db
+      .query("books")
+      .withIndex("by_accession", (q: any) => q.eq("accessionNumber", code))
+      .first();
+
+    // If not found, try by ISBN
+    if (!book) {
+      // Clean ISBN (remove hyphens and spaces)
+      const cleanIsbn = code.replace(/[-\s]/g, "");
+
+      // Try to find by ISBN - get first available copy
+      const booksByIsbn = await ctx.db
+        .query("books")
+        .withIndex("by_isbn", (q: any) => q.eq("isbn", cleanIsbn))
+        .collect();
+
+      // Prefer an available copy
+      book = booksByIsbn.find((b: any) => b.status === "available") ?? booksByIsbn[0] ?? null;
+    }
+
+    if (!book) return null;
+
+    // Return book info for kiosk display
+    return {
+      _id: book._id,
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn,
+      accessionNumber: book.accessionNumber,
+      status: book.status,
+      coverId: book.coverId,
+      // Flag to indicate if this was found by ISBN (might have multiple copies)
+      foundByIsbn: code.replace(/[-\s]/g, "") === book.isbn,
+    };
+  },
+});
+
+// Get all books by ISBN with pagination - KIOSK VERSION (no auth required)
+// Used when ISBN is scanned and we need to show all copies
+export const getBooksByIsbnPaginated = query({
+  args: {
+    isbn: v.string(),
+    cursor: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const cleanIsbn = args.isbn.replace(/[-\s]/g, "");
+    const limit = args.limit ?? 10;
+
+    // Get all books with this ISBN
+    const allBooks = await ctx.db
+      .query("books")
+      .withIndex("by_isbn", (q: any) => q.eq("isbn", cleanIsbn))
+      .collect();
+
+    if (allBooks.length === 0) {
+      return {
+        books: [],
+        totalCount: 0,
+        hasMore: false,
+        nextCursor: null,
+      };
+    }
+
+    // Simple cursor-based pagination using index
+    const cursorIndex = args.cursor
+      ? allBooks.findIndex((b: any) => b._id === args.cursor)
+      : 0;
+    const startIndex = cursorIndex >= 0 ? cursorIndex : 0;
+    const paginatedBooks = allBooks.slice(startIndex, startIndex + limit + 1);
+
+    const hasMore = paginatedBooks.length > limit;
+    const booksToReturn = hasMore ? paginatedBooks.slice(0, limit) : paginatedBooks;
+    const lastBook = booksToReturn[booksToReturn.length - 1];
+
+    return {
+      books: booksToReturn.map((book: any) => ({
+        _id: book._id,
+        title: book.title,
+        author: book.author,
+        isbn: book.isbn,
+        accessionNumber: book.accessionNumber,
+        status: book.status,
+        coverId: book.coverId,
+        location: book.location,
+      })),
+      totalCount: allBooks.length,
+      availableCount: allBooks.filter((b: any) => b.status === "available").length,
+      hasMore,
+      nextCursor: hasMore && lastBook ? lastBook._id : null,
+    };
+  },
+});
+
+// Detect code type (accession vs ISBN) - KIOSK VERSION (no auth required)
+// Returns the type of code and count of matching books
+export const detectCodeType = query({
+  args: { code: v.string() },
+  handler: async (ctx, args) => {
+    const code = args.code.trim();
+    const cleanCode = code.replace(/[-\s]/g, "");
+
+    // Check if it's an ISBN-like pattern (10 or 13 digits, or with check digit X)
+    const isIsbnPattern = /^(?:\d{10}|\d{13}|\d{9}X)$/i.test(cleanCode);
+
+    // Try exact accession number match first
+    const bookByAccession = await ctx.db
+      .query("books")
+      .withIndex("by_accession", (q: any) => q.eq("accessionNumber", code))
+      .first();
+
+    if (bookByAccession) {
+      return {
+        type: "accession" as const,
+        code: code,
+        book: {
+          _id: bookByAccession._id,
+          title: bookByAccession.title,
+          author: bookByAccession.author,
+          isbn: bookByAccession.isbn,
+          accessionNumber: bookByAccession.accessionNumber,
+          status: bookByAccession.status,
+          coverId: bookByAccession.coverId,
+        },
+        count: 1,
+      };
+    }
+
+    // Try ISBN lookup
+    if (isIsbnPattern) {
+      const booksByIsbn = await ctx.db
+        .query("books")
+        .withIndex("by_isbn", (q: any) => q.eq("isbn", cleanCode))
+        .collect();
+
+      if (booksByIsbn.length > 0) {
+        return {
+          type: "isbn" as const,
+          code: cleanCode,
+          book: null,
+          count: booksByIsbn.length,
+          availableCount: booksByIsbn.filter((b: any) => b.status === "available").length,
+        };
+      }
+    }
+
+    // Not found
+    return {
+      type: "unknown" as const,
+      code: code,
+      book: null,
+      count: 0,
+    };
+  },
+});
+
+// Verify librarian for override - KIOSK VERSION
+export const verifyLibrarian = mutation({
+  args: { code: v.string() },
+  handler: async (ctx, args) => {
+    // Find librarian by employeeId (scanned code)
+    const librarian = await ctx.db
+      .query("librarians")
+      .filter((q) => q.eq(q.field("employeeId"), args.code))
+      .first();
+
+    if (!librarian) {
+      throw new Error("Invalid staff ID.");
+    }
+
+    if (!librarian.isActive) {
+      throw new Error("Staff account is inactive.");
+    }
+
+    return {
+      _id: librarian._id,
+      name: librarian.name,
+      role: librarian.role
+    };
+  },
+});
+
 // Checkout a book - KIOSK VERSION (no auth required)
 export const checkout = mutation({
   args: {
     studentId: v.id("students"),
     accessionNumber: v.string(),
+    overrideLibrarianId: v.optional(v.id("librarians")),
   },
   handler: async (ctx, args) => {
     // Get student
@@ -156,17 +371,26 @@ export const checkout = mutation({
       .filter((q: any) => q.eq(q.field("isReturned"), false))
       .collect();
 
-    if (activeLoans.length >= student.borrowingLimit) {
+    if (activeLoans.length >= student.borrowingLimit && !args.overrideLibrarianId) {
       throw new Error(
         `Borrowing limit reached (${activeLoans.length}/${student.borrowingLimit}). Return a book first.`
       );
+    }
+
+    // If override is provided, verify it exists (double check)
+    let overrideLibrarian = null;
+    if (args.overrideLibrarianId) {
+      overrideLibrarian = await ctx.db.get(args.overrideLibrarianId);
+      if (!overrideLibrarian) {
+        throw new Error("Invalid override staff ID provided.");
+      }
     }
 
     // Check for overdue books
     const overdueLoans = activeLoans.filter(
       (loan: any) => loan.dueDate < Date.now()
     );
-    if (overdueLoans.length > 0) {
+    if (overdueLoans.length > 0 && !args.overrideLibrarianId) {
       throw new Error(
         `You have ${overdueLoans.length} overdue book(s). Please return them first.`
       );
@@ -189,10 +413,11 @@ export const checkout = mutation({
     // Calculate due date
     const dueDate = await calculateDueDate(ctx, borrowingDays);
 
-    // Create transaction (without librarianId - kiosk checkout)
+    // Create transaction (without librarianId - kiosk checkout, unless override)
     const transactionId = await ctx.db.insert("transactions", {
       studentId: args.studentId,
       bookId: book._id,
+      librarianId: args.overrideLibrarianId, // Record who authorized if overridden
       checkoutDate: Date.now(),
       dueDate,
       isReturned: false,
@@ -200,6 +425,7 @@ export const checkout = mutation({
       renewalCount: 0,
       maxRenewals,
       device: "kiosk",
+      notes: args.overrideLibrarianId ? `Override by ${overrideLibrarian?.name}` : undefined,
     });
 
     // Update book status
@@ -215,6 +441,7 @@ export const checkout = mutation({
       action: "checkout",
       entityType: "transaction",
       entityId: transactionId,
+      librarianId: args.overrideLibrarianId,
       details: JSON.stringify({
         studentId: args.studentId,
         studentName: student.name,
@@ -223,6 +450,8 @@ export const checkout = mutation({
         accessionNumber: args.accessionNumber,
         dueDate,
         source: "kiosk",
+        overridden: !!args.overrideLibrarianId,
+        overrideBy: overrideLibrarian?.name,
       }),
       device: "kiosk",
       timestamp: Date.now(),

@@ -1,5 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute } from "@tanstack/react-router"
+import { useState, useEffect, useMemo } from "react";
+import { useForm, useStore } from "@tanstack/react-form";
+import { z } from "zod";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -78,41 +80,24 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 
+const memberSchema = z.object({
+  name: z.string().min(1, "Full name is required"),
+  role: z.enum(["admin", "staff", "student_assistant"]),
+  employeeId: z.string(),
+  phone: z.string(),
+});
+
+const inviteSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  name: z.string().min(1, "Full name is required"),
+  role: z.enum(["admin", "staff", "student_assistant"]),
+  employeeId: z.string(),
+  phone: z.string(),
+});
+
 export const Route = createFileRoute("/settings/members")({
   component: MembersPage,
 });
-
-type Role = "admin" | "staff" | "student_assistant";
-
-interface MemberFormData {
-  name: string;
-  role: Role;
-  employeeId: string;
-  phone: string;
-}
-
-interface InviteFormData {
-  email: string;
-  name: string;
-  role: Role;
-  employeeId: string;
-  phone: string;
-}
-
-const initialMemberFormData: MemberFormData = {
-  name: "",
-  role: "staff",
-  employeeId: "",
-  phone: "",
-};
-
-const initialInviteFormData: InviteFormData = {
-  email: "",
-  name: "",
-  role: "staff",
-  employeeId: "",
-  phone: "",
-};
 
 function MembersPage() {
   return (
@@ -143,14 +128,78 @@ function MembersContent() {
   const [selectedMember, setSelectedMember] = useState<{
     _id: Id<"librarians">;
     name: string;
-    role: Role;
+    role: "admin" | "staff" | "student_assistant";
     employeeId?: string;
     phone?: string;
     isActive: boolean;
   } | null>(null);
-  const [memberFormData, setMemberFormData] = useState<MemberFormData>(initialMemberFormData);
-  const [inviteFormData, setInviteFormData] = useState<InviteFormData>(initialInviteFormData);
   const [isLoading, setIsLoading] = useState(false);
+
+  const editForm = useForm({
+    defaultValues: {
+      name: "",
+      role: "staff" as "admin" | "staff" | "student_assistant",
+      employeeId: "",
+      phone: "",
+    },
+    validators: {
+      onChange: memberSchema,
+    },
+    onSubmit: async ({ value }) => {
+      if (!selectedMember) return;
+      setIsLoading(true);
+      try {
+        await updateMember({
+          id: selectedMember._id,
+          name: value.name,
+          role: value.role,
+          employeeId: value.employeeId || undefined,
+          phone: value.phone || undefined,
+        });
+        toast.success("Member updated successfully!");
+        setIsEditDialogOpen(false);
+        setSelectedMember(null);
+      } catch (error: any) {
+        toast.error("Failed to update member", { description: error.message });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+  });
+
+  const inviteForm = useForm({
+    defaultValues: {
+      email: "",
+      name: "",
+      role: "staff" as "admin" | "staff" | "student_assistant",
+      employeeId: "",
+      phone: "",
+    },
+    validators: {
+      onChange: inviteSchema,
+    },
+    onSubmit: async ({ value }) => {
+      setIsLoading(true);
+      try {
+        await createInvite({
+          email: value.email,
+          name: value.name,
+          role: value.role,
+          employeeId: value.employeeId || undefined,
+          phone: value.phone || undefined,
+        });
+        toast.success("Invitation created successfully!", {
+          description: `${value.name} can now sign up with ${value.email}`,
+        });
+        setIsInviteDialogOpen(false);
+        inviteForm.reset();
+      } catch (error: any) {
+        toast.error("Failed to create invitation", { description: error.message });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+  });
 
   const filteredMembers = members?.filter((member) => {
     const query = searchQuery.toLowerCase();
@@ -167,7 +216,7 @@ function MembersContent() {
   const handleEditClick = (member: any) => {
     if (!member) return;
     setSelectedMember(member);
-    setMemberFormData({
+    editForm.reset({
       name: member.name,
       role: member.role,
       employeeId: member.employeeId || "",
@@ -179,29 +228,6 @@ function MembersContent() {
   const handleDeleteClick = (member: any) => {
     setSelectedMember(member);
     setIsDeleteDialogOpen(true);
-  };
-
-  const handleUpdate = async () => {
-    if (!selectedMember) return;
-
-    setIsLoading(true);
-    try {
-      await updateMember({
-        id: selectedMember._id,
-        name: memberFormData.name,
-        role: memberFormData.role,
-        employeeId: memberFormData.employeeId || undefined,
-        phone: memberFormData.phone || undefined,
-      });
-      toast.success("Member updated successfully!");
-      setIsEditDialogOpen(false);
-      setSelectedMember(null);
-      setMemberFormData(initialMemberFormData);
-    } catch (error: any) {
-      toast.error("Failed to update member", { description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const handleDelete = async () => {
@@ -234,29 +260,8 @@ function MembersContent() {
     }
   };
 
-  const handleCreateInvite = async () => {
-    if (!inviteFormData.email || !inviteFormData.name) return;
-
-    setIsLoading(true);
-    try {
-      await createInvite({
-        email: inviteFormData.email,
-        name: inviteFormData.name,
-        role: inviteFormData.role,
-        employeeId: inviteFormData.employeeId || undefined,
-        phone: inviteFormData.phone || undefined,
-      });
-      toast.success("Invitation created successfully!", {
-        description: `${inviteFormData.name} can now sign up with ${inviteFormData.email}`,
-      });
-      setIsInviteDialogOpen(false);
-      setInviteFormData(initialInviteFormData);
-    } catch (error: any) {
-      toast.error("Failed to create invitation", { description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // handleUpdate is now inside editForm.onSubmit
+  // handleCreateInvite is now inside inviteForm.onSubmit
 
   const handleRevokeInvite = async (inviteId: Id<"invites">) => {
     try {
@@ -758,72 +763,92 @@ function MembersContent() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name" className="flex items-center gap-2 text-xs">
-                <IconUserPlus className="h-4 w-4" />
-                Full Name
-              </Label>
-              <Input
-                id="edit-name"
-                value={memberFormData.name}
-                onChange={(e) =>
-                  setMemberFormData({ ...memberFormData, name: e.target.value })
-                }
-                placeholder="Enter full name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-role" className="flex items-center gap-2 text-xs">
-                <IconShieldCheck className="h-4 w-4" />
-                Role
-              </Label>
-              <Select
-                value={memberFormData.role}
-                onValueChange={(value: Role) =>
-                  setMemberFormData({ ...memberFormData, role: value })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Administrator</SelectItem>
-                  <SelectItem value="staff">Staff</SelectItem>
-                  <SelectItem value="student_assistant">
-                    Student Assistant
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <editForm.Field
+              name="name"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                    <IconUserPlus className="h-4 w-4" />
+                    Full Name
+                  </Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="Enter full name"
+                  />
+                </div>
+              )}
+            />
+            <editForm.Field
+              name="role"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                    <IconShieldCheck className="h-4 w-4" />
+                    Role
+                  </Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(value: "admin" | "staff" | "student_assistant") =>
+                      field.handleChange(value)
+                    }
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Administrator</SelectItem>
+                      <SelectItem value="staff">Staff</SelectItem>
+                      <SelectItem value="student_assistant">
+                        Student Assistant
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-employeeId" className="flex items-center gap-2 text-xs">
-                  <IconId className="h-4 w-4" />
-                  Employee ID
-                </Label>
-                <Input
-                  id="edit-employeeId"
-                  value={memberFormData.employeeId}
-                  onChange={(e) =>
-                    setMemberFormData({ ...memberFormData, employeeId: e.target.value })
-                  }
-                  placeholder="Employee ID"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-phone" className="flex items-center gap-2 text-xs">
-                  <IconPhone className="h-4 w-4" />
-                  Phone Number
-                </Label>
-                <Input
-                  id="edit-phone"
-                  value={memberFormData.phone}
-                  onChange={(e) =>
-                    setMemberFormData({ ...memberFormData, phone: e.target.value })
-                  }
-                  placeholder="Phone number"
-                />
-              </div>
+              <editForm.Field
+                name="employeeId"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                      <IconId className="h-4 w-4" />
+                      Employee ID
+                    </Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Employee ID"
+                    />
+                  </div>
+                )}
+              />
+              <editForm.Field
+                name="phone"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                      <IconPhone className="h-4 w-4" />
+                      Phone Number
+                    </Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Phone number"
+                    />
+                  </div>
+                )}
+              />
             </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -834,12 +859,21 @@ function MembersContent() {
             >
               Cancel
             </Button>
-            <Button onClick={handleUpdate} disabled={isLoading || !memberFormData.name} className="w-full sm:w-auto">
-              {isLoading ? (
-                <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : null}
-              Save Changes
-            </Button>
+            <editForm.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+              children={([canSubmit, isSubmitting]) => (
+                <Button
+                  onClick={() => editForm.handleSubmit()}
+                  disabled={isLoading || isSubmitting || !canSubmit}
+                  className="w-full sm:w-auto"
+                >
+                  {isLoading || isSubmitting ? (
+                    <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : null}
+                  Save Changes
+                </Button>
+              )}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -894,87 +928,117 @@ function MembersContent() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto px-1">
-            <div className="space-y-2">
-              <Label htmlFor="invite-email" className="flex items-center gap-2 text-xs">
-                <IconMail className="h-4 w-4" />
-                Email Address *
-              </Label>
-              <Input
-                id="invite-email"
-                type="email"
-                value={inviteFormData.email}
-                onChange={(e) =>
-                  setInviteFormData({ ...inviteFormData, email: e.target.value })
-                }
-                placeholder="member@school.edu"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-name" className="flex items-center gap-2 text-xs">
-                <IconUserPlus className="h-4 w-4" />
-                Full Name *
-              </Label>
-              <Input
-                id="invite-name"
-                value={inviteFormData.name}
-                onChange={(e) =>
-                  setInviteFormData({ ...inviteFormData, name: e.target.value })
-                }
-                placeholder="Enter full name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-role" className="flex items-center gap-2 text-xs">
-                <IconShieldCheck className="h-4 w-4" />
-                Role *
-              </Label>
-              <Select
-                value={inviteFormData.role}
-                onValueChange={(value: Role) =>
-                  setInviteFormData({ ...inviteFormData, role: value })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Administrator</SelectItem>
-                  <SelectItem value="staff">Staff</SelectItem>
-                  <SelectItem value="student_assistant">
-                    Student Assistant
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <inviteForm.Field
+              name="email"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                    <IconMail className="h-4 w-4" />
+                    Email Address *
+                  </Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="email"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="member@school.edu"
+                  />
+                  {field.state.meta.isTouched && field.state.meta.errors.length > 0 && (
+                    <p className="text-[10px] text-destructive">
+                      {field.state.meta.errors[0]?.toString()}
+                    </p>
+                  )}
+                </div>
+              )}
+            />
+            <inviteForm.Field
+              name="name"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                    <IconUserPlus className="h-4 w-4" />
+                    Full Name *
+                  </Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="Enter full name"
+                  />
+                </div>
+              )}
+            />
+            <inviteForm.Field
+              name="role"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                    <IconShieldCheck className="h-4 w-4" />
+                    Role *
+                  </Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(value: "admin" | "staff" | "student_assistant") =>
+                      field.handleChange(value)
+                    }
+                  >
+                    <SelectTrigger id={field.name}>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Administrator</SelectItem>
+                      <SelectItem value="staff">Staff</SelectItem>
+                      <SelectItem value="student_assistant">
+                        Student Assistant
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="invite-employeeId" className="flex items-center gap-2 text-xs">
-                  <IconId className="h-4 w-4" />
-                  Employee ID
-                </Label>
-                <Input
-                  id="invite-employeeId"
-                  value={inviteFormData.employeeId}
-                  onChange={(e) =>
-                    setInviteFormData({ ...inviteFormData, employeeId: e.target.value })
-                  }
-                  placeholder="ID (optional)"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="invite-phone" className="flex items-center gap-2 text-xs">
-                  <IconPhone className="h-4 w-4" />
-                  Phone Number
-                </Label>
-                <Input
-                  id="invite-phone"
-                  value={inviteFormData.phone}
-                  onChange={(e) =>
-                    setInviteFormData({ ...inviteFormData, phone: e.target.value })
-                  }
-                  placeholder="Phone (optional)"
-                />
-              </div>
+              <inviteForm.Field
+                name="employeeId"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                      <IconId className="h-4 w-4" />
+                      Employee ID
+                    </Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="ID (optional)"
+                    />
+                  </div>
+                )}
+              />
+              <inviteForm.Field
+                name="phone"
+                children={(field) => (
+                  <div className="space-y-2">
+                    <Label htmlFor={field.name} className="flex items-center gap-2 text-xs">
+                      <IconPhone className="h-4 w-4" />
+                      Phone Number
+                    </Label>
+                    <Input
+                      id={field.name}
+                      name={field.name}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Phone (optional)"
+                    />
+                  </div>
+                )}
+              />
             </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -985,18 +1049,23 @@ function MembersContent() {
             >
               Cancel
             </Button>
-            <Button
-              onClick={handleCreateInvite}
-              disabled={isLoading || !inviteFormData.email || !inviteFormData.name}
-              className="w-full sm:w-auto"
-            >
-              {isLoading ? (
-                <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <IconMailPlus className="h-4 w-4 mr-2" />
+            <inviteForm.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting] as const}
+              children={([canSubmit, isSubmitting]) => (
+                <Button
+                  onClick={() => inviteForm.handleSubmit()}
+                  disabled={isLoading || isSubmitting || !canSubmit}
+                  className="w-full sm:w-auto"
+                >
+                  {isLoading || isSubmitting ? (
+                    <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <IconMailPlus className="h-4 w-4 mr-2" />
+                  )}
+                  Send Invitation
+                </Button>
               )}
-              Send Invitation
-            </Button>
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

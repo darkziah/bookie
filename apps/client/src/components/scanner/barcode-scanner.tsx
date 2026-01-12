@@ -1,12 +1,13 @@
-import { useEffect, useRef, useCallback, useState } from "react";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { BarcodeScanner as ReactBarcodeScanner } from "react-barcode-scanner";
+import "react-barcode-scanner/polyfill";
 import { Button } from "@bookie/ui/components/ui/button";
 import {
   IconCamera,
   IconCameraOff,
-  IconRefresh,
   IconKeyboard,
   IconX,
+  IconSwitchHorizontal,
 } from "@tabler/icons-react";
 import { cn } from "@bookie/ui/lib/utils";
 
@@ -14,7 +15,6 @@ interface BarcodeScannerProps {
   onScan: (code: string) => void;
   onError?: (error: string) => void;
   placeholder?: string;
-  supportedFormats?: Html5QrcodeSupportedFormats[];
   className?: string;
   scanButtonLabel?: string;
   showManualEntry?: boolean;
@@ -22,23 +22,12 @@ interface BarcodeScannerProps {
   fullscreenOnMobile?: boolean;
 }
 
-const DEFAULT_FORMATS = [
-  Html5QrcodeSupportedFormats.QR_CODE,
-  Html5QrcodeSupportedFormats.CODE_39,
-  Html5QrcodeSupportedFormats.CODE_93,
-  Html5QrcodeSupportedFormats.CODE_128,
-  Html5QrcodeSupportedFormats.EAN_13,
-  Html5QrcodeSupportedFormats.EAN_8,
-  Html5QrcodeSupportedFormats.UPC_A,
-  Html5QrcodeSupportedFormats.UPC_E,
-  Html5QrcodeSupportedFormats.ITF,
-];
+type CameraFacing = "environment" | "user";
 
 export function BarcodeScanner({
   onScan,
   onError,
   placeholder = "Scan or enter code...",
-  supportedFormats = DEFAULT_FORMATS,
   className,
   scanButtonLabel = "Scan",
   showManualEntry = true,
@@ -49,95 +38,20 @@ export function BarcodeScanner({
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("environment");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
-  const fullscreenContainerRef = useRef<HTMLDivElement>(null);
-  const scannerIdRef = useRef(`scanner-${Math.random().toString(36).substr(2, 9)}`);
-
-  const stopScanning = useCallback(async () => {
-    if (scannerRef.current && scannerRef.current.isScanning) {
-      try {
-        await scannerRef.current.stop();
-      } catch (error) {
-        console.warn("Error stopping scanner:", error);
-      }
-    }
-    setIsScanning(false);
-  }, []);
-
-  const startScanning = useCallback(async () => {
-    if (!containerRef.current) return;
-
-    try {
-      // Check if already scanning
-      if (scannerRef.current?.isScanning) {
-        await stopScanning();
-      }
-
-      // Create new scanner instance
-      scannerRef.current = new Html5Qrcode(scannerIdRef.current, {
-        formatsToSupport: supportedFormats,
-        verbose: false,
-      });
-
-      await scannerRef.current.start(
-        { facingMode: "environment" },
-        {
-          fps: 20,
-          qrbox: (viewfinderWidth, viewfinderHeight) => {
-            // Optimal for linear barcodes: wider and shorter
-            const width = Math.min(viewfinderWidth * 0.8, 500);
-            const height = Math.min(viewfinderHeight * 0.3, 200);
-            return { width, height };
-          },
-          aspectRatio: 1.777778,
-          disableFlip: true,
-        },
-        (decodedText) => {
-          // Prevent duplicate scans
-          if (decodedText !== lastScanned) {
-            setLastScanned(decodedText);
-            onScan(decodedText);
-
-            // Visual feedback - flash effect
-            if (containerRef.current) {
-              containerRef.current.classList.add("scanner-success");
-              setTimeout(() => {
-                containerRef.current?.classList.remove("scanner-success");
-              }, 300);
-            }
-
-            // Auto-stop after successful scan
-            stopScanning();
-          }
-        },
-        () => {
-          // Scanning in progress, ignore errors
-        }
-      );
-
-      setIsScanning(true);
-      setHasPermission(true);
-    } catch (error: any) {
-      console.error("Scanner error:", error);
-      setHasPermission(false);
-      onError?.(error.message || "Failed to start scanner");
-    }
-  }, [supportedFormats, onScan, onError, lastScanned, stopScanning]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (scannerRef.current?.isScanning) {
-        scannerRef.current.stop().catch(console.warn);
-      }
-    };
-  }, []);
+  const lastScanRef = useRef<{ code: string; time: number } | null>(null);
 
   // Detect mobile viewport
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
+      const isMobileDevice =
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        ) || window.innerWidth < 768;
+      setIsMobile(isMobileDevice);
     };
     checkMobile();
     window.addEventListener("resize", checkMobile);
@@ -162,6 +76,85 @@ export function BarcodeScanner({
     }
   }, [lastScanned]);
 
+  const startScanning = useCallback(async () => {
+    setErrorMessage(null);
+
+    // Check for camera permission first
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setHasPermission(true);
+      setIsScanning(true);
+    } catch (error: any) {
+      console.error("Camera permission error:", error);
+      setHasPermission(false);
+
+      let message = "Failed to access camera";
+      if (error.name === "NotAllowedError") {
+        message = "Camera access denied. Please enable camera permissions.";
+      } else if (error.name === "NotFoundError") {
+        message = "No camera found on this device.";
+      } else if (error.name === "NotReadableError") {
+        message = "Camera is in use by another application.";
+      }
+
+      setErrorMessage(message);
+      onError?.(message);
+    }
+  }, [onError]);
+
+  const stopScanning = useCallback(() => {
+    setIsScanning(false);
+  }, []);
+
+  const handleCapture = useCallback(
+    (detectedCodes: { rawValue: string }[]) => {
+      const firstCode = detectedCodes[0];
+      if (firstCode) {
+        const code = firstCode.rawValue;
+        const now = Date.now();
+
+        // Prevent duplicate scans within 2 seconds
+        if (
+          lastScanRef.current &&
+          lastScanRef.current.code === code &&
+          now - lastScanRef.current.time < 2000
+        ) {
+          return;
+        }
+
+        lastScanRef.current = { code, time: now };
+        setLastScanned(code);
+
+        // Visual feedback - flash effect
+        if (containerRef.current) {
+          containerRef.current.classList.add("scanner-success");
+          setTimeout(() => {
+            containerRef.current?.classList.remove("scanner-success");
+          }, 300);
+        }
+
+        onScan(code);
+        stopScanning();
+      }
+    },
+    [onScan, stopScanning]
+  );
+
+  const handleError = useCallback(
+    (error: Error) => {
+      console.error("Scanner error:", error);
+      const message = error.message || "Scanner error occurred";
+      setErrorMessage(message);
+      onError?.(message);
+    },
+    [onError]
+  );
+
+  const switchCamera = useCallback(() => {
+    setCameraFacing((prev) => (prev === "environment" ? "user" : "environment"));
+  }, []);
+
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (manualEntry.trim()) {
@@ -173,58 +166,108 @@ export function BarcodeScanner({
   // Determine if we should use fullscreen mode
   const useFullscreen = isScanning && isMobile && fullscreenOnMobile;
 
-  // Scanner overlay content (shared between inline and fullscreen modes)
-  const scannerOverlay = (
-    <>
-      <div className="absolute inset-0 pointer-events-none border-2 border-primary/30" />
+  // Scanner content with overlay
+  const scannerContent = (
+    <div className={cn("relative w-full", useFullscreen ? "h-full" : "aspect-video")}>
+      <ReactBarcodeScanner
+        options={{
+          delay: 500,
+          formats: [
+            "ean_13",
+            "ean_8",
+            "code_128",
+            "code_39",
+            "code_93",
+            "upc_a",
+            "upc_e",
+            "itf",
+            "qr_code",
+          ],
+        }}
+        onCapture={handleCapture}
+        trackConstraints={{
+          facingMode: cameraFacing,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        }}
+        className="w-full h-full object-cover"
+      />
 
-      {/* Laser Line Animation */}
-      <div className={cn(
-        "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none",
-        useFullscreen ? "w-[90%] h-[40%] max-w-none max-h-none" : "w-[80%] max-w-[500px] h-[30%] max-h-[200px]"
-      )}>
-        <div className="absolute inset-0 border-2 border-primary/50 rounded-sm" />
-        <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-primary" />
-        <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-primary" />
-        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-primary" />
-        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-primary" />
-        <div className="w-full h-[2px] bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] absolute top-0 animate-scanner-laser" />
-      </div>
+      {/* Scan frame overlay */}
+      <div className="absolute inset-0 pointer-events-none">
+        {/* Darkened edges */}
+        <div className="absolute inset-0 bg-black/40" />
 
-      {/* Bottom controls */}
-      <div className={cn(
-        "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent",
-        useFullscreen ? "p-6 pb-safe" : "p-4"
-      )}>
-        <div className="flex items-center justify-between">
-          <span className={cn(
-            "text-white font-medium flex items-center gap-2",
-            useFullscreen ? "text-base" : "text-sm"
-          )}>
-            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-            Align barcode within frame
-          </span>
-          <Button
-            variant="destructive"
-            size={useFullscreen ? "default" : "sm"}
-            onClick={stopScanning}
-          >
-            Cancel
-          </Button>
+        {/* Clear scan area */}
+        <div
+          className={cn(
+            "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+            useFullscreen
+              ? "w-[85%] max-w-[350px] h-[150px]"
+              : "w-[80%] max-w-[320px] h-[100px]"
+          )}
+          style={{
+            boxShadow: "0 0 0 9999px rgba(0,0,0,0.4)",
+          }}
+        >
+          {/* Corner brackets */}
+          <div className="absolute inset-0 border-2 border-primary/50 rounded-sm" />
+          <div className="absolute top-0 left-0 w-6 h-6 border-t-[3px] border-l-[3px] border-primary rounded-tl-sm" />
+          <div className="absolute top-0 right-0 w-6 h-6 border-t-[3px] border-r-[3px] border-primary rounded-tr-sm" />
+          <div className="absolute bottom-0 left-0 w-6 h-6 border-b-[3px] border-l-[3px] border-primary rounded-bl-sm" />
+          <div className="absolute bottom-0 right-0 w-6 h-6 border-b-[3px] border-r-[3px] border-primary rounded-br-sm" />
+
+          {/* Laser Line Animation */}
+          <div className="w-full h-[2px] bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] absolute top-0 animate-scanner-laser" />
         </div>
       </div>
 
-      {/* Close button for fullscreen mode */}
+      {/* Top controls for fullscreen */}
       {useFullscreen && (
-        <button
-          onClick={stopScanning}
-          className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors z-10 mt-safe"
-          aria-label="Close scanner"
-        >
-          <IconX className="h-6 w-6" />
-        </button>
+        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-4 pt-safe flex justify-between items-start z-10">
+          <button
+            onClick={stopScanning}
+            className="p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+            aria-label="Close scanner"
+          >
+            <IconX className="h-6 w-6" />
+          </button>
+
+          <button
+            onClick={switchCamera}
+            className="p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+            aria-label="Switch camera"
+          >
+            <IconSwitchHorizontal className="h-6 w-6" />
+          </button>
+        </div>
       )}
-    </>
+
+      {/* Bottom controls */}
+      <div
+        className={cn(
+          "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent",
+          useFullscreen ? "p-6 pb-safe" : "p-4"
+        )}
+      >
+        <div className="flex items-center justify-between">
+          <span
+            className={cn(
+              "text-white font-medium flex items-center gap-2",
+              useFullscreen ? "text-base" : "text-sm"
+            )}
+          >
+            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+            Align barcode within frame
+          </span>
+          {!useFullscreen && (
+            <Button variant="destructive" size="sm" onClick={stopScanning}>
+              Cancel
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 
   return (
@@ -236,26 +279,31 @@ export function BarcodeScanner({
           className="relative rounded-lg overflow-hidden bg-muted/50 transition-all"
         >
           {/* Inline scanner (for desktop or when not using fullscreen) */}
-          {!useFullscreen && (
-            <div
-              id={scannerIdRef.current}
-              className={cn(
-                "w-full aspect-video",
-                !isScanning && "hidden"
-              )}
-            />
+          {isScanning && !useFullscreen && (
+            <div className="relative w-full aspect-video bg-black overflow-hidden rounded-lg">
+              {scannerContent}
+            </div>
           )}
 
           {!isScanning && (
             <div className="w-full aspect-video flex flex-col items-center justify-center gap-4 p-4">
-              {hasPermission === false ? (
+              {errorMessage ? (
+                <>
+                  <IconCameraOff className="h-12 w-12 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground text-center max-w-xs">
+                    {errorMessage}
+                  </p>
+                  <Button type="button" variant="outline" size="sm" onClick={startScanning}>
+                    Try Again
+                  </Button>
+                </>
+              ) : hasPermission === false ? (
                 <>
                   <IconCameraOff className="h-12 w-12 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground text-center">
                     Camera access denied. Please enable camera permissions.
                   </p>
-                  <Button variant="outline" size="sm" onClick={startScanning}>
-                    <IconRefresh className="mr-2 h-4 w-4" />
+                  <Button type="button" variant="outline" size="sm" onClick={startScanning}>
                     Try Again
                   </Button>
                 </>
@@ -265,18 +313,13 @@ export function BarcodeScanner({
                   <p className="text-sm text-muted-foreground">
                     Click to start scanning
                   </p>
-                  <Button onClick={startScanning}>
+                  <Button onClick={startScanning} type="button">
                     <IconCamera className="mr-2 h-4 w-4" />
                     {scanButtonLabel}
                   </Button>
                 </>
               )}
             </div>
-          )}
-
-          {/* Inline scanning indicator & Overlay (for desktop) */}
-          {isScanning && !useFullscreen && (
-            <>{scannerOverlay}</>
           )}
         </div>
 
@@ -293,7 +336,11 @@ export function BarcodeScanner({
                 className="w-full pl-10 pr-4 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
-            <Button type="submit" variant="secondary" disabled={!manualEntry.trim()}>
+            <Button
+              type="submit"
+              variant="secondary"
+              disabled={!manualEntry.trim()}
+            >
               Enter
             </Button>
           </form>
@@ -310,42 +357,25 @@ export function BarcodeScanner({
           }
           @keyframes scanner-laser {
             0% { top: 0%; }
-            50% { top: 100%; }
+            50% { top: calc(100% - 2px); }
             100% { top: 0%; }
           }
           .animate-scanner-laser {
-            animation: scanner-laser 2s linear infinite;
-          }
-          #${scannerIdRef.current} video {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: cover;
-          }
-          #${scannerIdRef.current} {
-            background: #000;
+            animation: scanner-laser 2s ease-in-out infinite;
           }
           /* Safe area support for notched devices */
           .pb-safe {
             padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
           }
-          .mt-safe {
-            margin-top: max(1rem, env(safe-area-inset-top));
+          .pt-safe {
+            padding-top: max(1rem, env(safe-area-inset-top));
           }
         `}</style>
       </div>
 
       {/* Fullscreen Scanner Overlay (for mobile) */}
       {useFullscreen && (
-        <div
-          ref={fullscreenContainerRef}
-          className="fixed inset-0 z-50 bg-black"
-        >
-          <div
-            id={scannerIdRef.current}
-            className="w-full h-full"
-          />
-          {scannerOverlay}
-        </div>
+        <div className="fixed inset-0 z-50 bg-black">{scannerContent}</div>
       )}
     </>
   );

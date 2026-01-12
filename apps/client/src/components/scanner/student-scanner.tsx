@@ -1,4 +1,3 @@
-import { Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { BarcodeScanner } from "./barcode-scanner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@bookie/ui/components/ui/card";
 import { IconUser } from "@tabler/icons-react";
@@ -8,14 +7,6 @@ interface StudentScannerProps {
   onError?: (error: string) => void;
   className?: string;
 }
-
-const STUDENT_FORMATS = [
-  Html5QrcodeSupportedFormats.QR_CODE,
-  Html5QrcodeSupportedFormats.CODE_39,
-  Html5QrcodeSupportedFormats.CODE_93,
-  Html5QrcodeSupportedFormats.CODE_128,
-  Html5QrcodeSupportedFormats.ITF,
-];
 
 export function StudentScanner({ onScan, onError, className }: StudentScannerProps) {
   return (
@@ -34,7 +25,6 @@ export function StudentScanner({ onScan, onError, className }: StudentScannerPro
           onScan={onScan}
           onError={onError}
           placeholder="Enter Student ID (e.g., 2024-0001)"
-          supportedFormats={STUDENT_FORMATS}
           scanButtonLabel="Scan Student ID"
         />
       </CardContent>
