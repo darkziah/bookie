@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { paginationOptsValidator } from "convex/server";
 import { auth } from "./auth";
 
 // Helper to check if user is authenticated librarian
@@ -56,6 +57,46 @@ export const list = query({
       .order("desc")
       .take(args.limit ?? 100);
     return students;
+  },
+});
+
+// Paginated list of students
+export const paginatedList = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    gradeLevel: v.optional(v.number()),
+    blocked: v.optional(v.boolean()),
+    searchTerm: v.optional(v.string()), // Basic filter if needed
+  },
+  handler: async (ctx, args) => {
+    await requireLibrarian(ctx);
+
+    if (args.searchTerm && args.searchTerm.length >= 2) {
+      // If searching, use search index (pagination might be tricky with search depending on Convex version, 
+      // but usually search returns a list. For true pagination with search, we might need a different approach 
+      // or just return the search results as a "page".)
+      // Note: Convex search queries don't typically chain with .paginate() directly in the same way as index queries.
+      // For now, if searching, we fallback to non-paginated search limited to reasonable size (or just use the search query directly from frontend).
+      // LET'S STICK TO FILTERING for pagination.
+    }
+
+    let q = ctx.db.query("students");
+
+    if (args.gradeLevel !== undefined) {
+      return await q
+        .withIndex("by_grade", (q: any) => q.eq("gradeLevel", args.gradeLevel))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.blocked !== undefined) {
+      return await q
+        .withIndex("by_blocked", (q: any) => q.eq("isBlocked", args.blocked))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    return await q.order("desc").paginate(args.paginationOpts);
   },
 });
 
@@ -152,8 +193,14 @@ export const create = mutation({
       throw new Error(`Student ID ${args.studentId} already exists`);
     }
 
-    // Get default borrowing limit based on grade level
-    const borrowingLimit = getBorrowingLimit(args.gradeLevel);
+    // Get borrowing limits from settings
+    const limitsSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "borrowingLimits"))
+      .first();
+
+    const borrowingLimits = limitsSetting?.value;
+    const borrowingLimit = calculateBorrowingLimit(args.gradeLevel, borrowingLimits);
 
     const now = Date.now();
     return await ctx.db.insert("students", {
@@ -189,8 +236,15 @@ export const update = mutation({
     );
 
     // If grade level changed, update borrowing limit
-    if (updates.gradeLevel !== undefined) {
-      const newLimit = getBorrowingLimit(updates.gradeLevel);
+    if (updates.gradeLevel !== undefined && updates.borrowingLimit === undefined) {
+      // Get borrowing limits from settings
+      const limitsSetting = await ctx.db
+        .query("settings")
+        .withIndex("by_key", (q: any) => q.eq("key", "borrowingLimits"))
+        .first();
+
+      const borrowingLimits = limitsSetting?.value;
+      const newLimit = calculateBorrowingLimit(updates.gradeLevel, borrowingLimits);
       (filteredUpdates as any).borrowingLimit = newLimit;
     }
 
@@ -253,13 +307,16 @@ export const remove = mutation({
   },
 });
 
-// Help function to get borrowing limit (exported for use in bulkCreate)
-function getBorrowingLimit(gradeLevel: number): number {
-  if (gradeLevel >= 1 && gradeLevel <= 3) return 1;
-  if (gradeLevel >= 4 && gradeLevel <= 6) return 2;
-  if (gradeLevel >= 7 && gradeLevel <= 10) return 5;
-  if (gradeLevel >= 11 && gradeLevel <= 12) return 7;
-  return 3; // Default
+// Helper function to calculate borrowing limit from settings
+function calculateBorrowingLimit(gradeLevel: number, limits: Record<string, any> | null): number {
+  if (!limits) return 3; // Default fallback
+
+  if (gradeLevel >= 1 && gradeLevel <= 3) return Number(limits["1-3"] ?? 1);
+  if (gradeLevel >= 4 && gradeLevel <= 6) return Number(limits["4-6"] ?? 2);
+  if (gradeLevel >= 7 && gradeLevel <= 10) return Number(limits["7-10"] ?? 5);
+  if (gradeLevel >= 11 && gradeLevel <= 12) return Number(limits["11-12"] ?? 7);
+
+  return 3; // Default fallback
 }
 
 // Bulk create students (for CSV import)
@@ -281,6 +338,13 @@ export const bulkCreate = mutation({
   handler: async (ctx, args) => {
     await requireLibrarian(ctx, ["admin", "staff"]);
 
+    // Fetch limits once for the batch
+    const limitsSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "borrowingLimits"))
+      .first();
+    const borrowingLimits = limitsSetting?.value;
+
     const results = { created: 0, skipped: 0, errors: [] as string[] };
     const now = Date.now();
 
@@ -298,7 +362,7 @@ export const bulkCreate = mutation({
       }
 
       try {
-        const borrowingLimit = getBorrowingLimit(student.gradeLevel);
+        const borrowingLimit = calculateBorrowingLimit(student.gradeLevel, borrowingLimits);
         await ctx.db.insert("students", {
           ...student,
           borrowingLimit,

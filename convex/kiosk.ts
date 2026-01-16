@@ -37,7 +37,7 @@ export const getKioskSettings = query({
   },
 });
 
-// Calculate due date excluding weekends and holidays
+// Calculate due date - includes weekends, only skips holidays
 async function calculateDueDate(ctx: any, borrowingDays: number): Promise<number> {
   const holidays = await ctx.db.query("holidays").collect();
   const holidayDates = new Set(
@@ -52,13 +52,9 @@ async function calculateDueDate(ctx: any, borrowingDays: number): Promise<number
 
   while (daysAdded < borrowingDays) {
     dueDate.setDate(dueDate.getDate() + 1);
-    const dayOfWeek = dueDate.getDay();
     const dateKey = `${dueDate.getFullYear()}-${dueDate.getMonth()}-${dueDate.getDate()}`;
 
-    // Skip weekends (0 = Sunday, 6 = Saturday)
-    if (dayOfWeek === 0 || dayOfWeek === 6) continue;
-
-    // Skip holidays
+    // Skip holidays only (weekends are now included)
     if (holidayDates.has(dateKey)) continue;
 
     daysAdded++;
@@ -493,11 +489,43 @@ export const checkin = mutation({
       throw new Error("This book is not currently checked out.");
     }
 
+    // Get overdue grace period
+    const gracePeriodSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "overdueGracePeriod"))
+      .first();
+    const gracePeriodDays = Number(gracePeriodSetting?.value ?? 0);
+    const gracePeriodMs = gracePeriodDays * 24 * 60 * 60 * 1000;
+
+    // Get overdue fee per day
+    const overdueFeePerDaySetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "overdueFeePerDay"))
+      .first();
+    const overdueFeePerDay = Number(overdueFeePerDaySetting?.value ?? 0);
+
     const returnDate = Date.now();
-    const wasOverdue = transaction.dueDate < returnDate;
+    const wasOverdue = transaction.dueDate + gracePeriodMs < returnDate;
+
+    // Calculate days overdue and fee
+    const daysOverdue = wasOverdue
+      ? Math.floor((returnDate - transaction.dueDate) / (24 * 60 * 60 * 1000))
+      : 0;
+    const overdueFee = daysOverdue * overdueFeePerDay;
 
     // Get student for the success message
-    const student = await ctx.db.get(transaction.studentId);
+    const student = transaction.studentId
+      ? await ctx.db.get(transaction.studentId)
+      : null;
+    const studentName = student && 'name' in student ? student.name : undefined;
+
+    // Update patron's outstanding fees if there's a fee
+    if (overdueFee > 0 && transaction.studentId && student) {
+      await ctx.db.patch(transaction.studentId, {
+        outstandingFees: ((student as any).outstandingFees ?? 0) + overdueFee,
+        updatedAt: Date.now(),
+      });
+    }
 
     // Update transaction
     await ctx.db.patch(transaction._id, {
@@ -519,14 +547,13 @@ export const checkin = mutation({
       entityId: transaction._id,
       details: JSON.stringify({
         studentId: transaction.studentId,
-        studentName: student?.name,
+        studentName,
         bookId: book._id,
         bookTitle: book.title,
         accessionNumber: args.accessionNumber,
         wasOverdue,
-        daysOverdue: wasOverdue
-          ? Math.floor((returnDate - transaction.dueDate) / (24 * 60 * 60 * 1000))
-          : 0,
+        daysOverdue,
+        overdueFee,
         source: "kiosk",
       }),
       device: "kiosk",
@@ -536,11 +563,10 @@ export const checkin = mutation({
     return {
       transactionId: transaction._id,
       wasOverdue,
-      daysOverdue: wasOverdue
-        ? Math.floor((returnDate - transaction.dueDate) / (24 * 60 * 60 * 1000))
-        : 0,
+      daysOverdue,
+      overdueFee,
       bookTitle: book.title,
-      studentName: student?.name,
+      studentName,
     };
   },
 });

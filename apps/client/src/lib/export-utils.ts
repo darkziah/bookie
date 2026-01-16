@@ -271,7 +271,7 @@ export function generateOverduePDF(
   data: {
     studentName: string;
     studentId: string;
-    gradeLevel?: number;
+    gradeLevel?: string | number;
     bookTitle: string;
     accessionNumber?: string;
     dueDate: number;

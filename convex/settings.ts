@@ -157,6 +157,11 @@ export const initializeDefaults = mutation({
         value: "B",
         description: "Prefix for auto-generated accession numbers",
       },
+      {
+        key: "overdueFeePerDay",
+        value: 0,
+        description: "Fee charged per day for overdue books (0 to disable)",
+      },
     ];
 
     for (const setting of defaults) {

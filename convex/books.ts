@@ -135,8 +135,10 @@ export const getByAccession = query({
         .first();
 
       if (loan) {
-        const student = await ctx.db.get(loan.studentId);
-        currentLoan = { ...loan, student };
+        let patron = null;
+        if (loan.studentId) patron = await ctx.db.get(loan.studentId);
+        else if (loan.facultyId) patron = await ctx.db.get(loan.facultyId);
+        currentLoan = { ...loan, student: patron };
       }
     }
 
@@ -378,12 +380,23 @@ export const getNextAccessionNumber = query({
   handler: async (ctx, args) => {
     await requireLibrarian(ctx);
 
-    const prefix = args.prefix ?? "B";
+    let prefix = args.prefix;
+    if (!prefix) {
+      // Get prefix from settings
+      const settingsPrefix = await ctx.db
+        .query("settings")
+        .withIndex("by_key", (q: any) => q.eq("key", "accessionPrefix"))
+        .first();
+      prefix = settingsPrefix?.value ?? "B";
+    }
+
     const year = new Date().getFullYear();
 
     // Get all books with matching prefix pattern
     const books = await ctx.db.query("books").collect();
-    const pattern = new RegExp(`^${prefix}-${year}-(\\d+)$`);
+    // Escape special regex characters in prefix just in case
+    const escapedPrefix = (prefix as string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^${escapedPrefix}-${year}-(\\d+)$`);
 
     let maxNumber = 0;
     for (const book of books) {

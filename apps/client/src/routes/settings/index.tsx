@@ -33,6 +33,7 @@ const settingsSchema = z.object({
   borrowingDays: z.string().min(1),
   maxRenewals: z.string().min(1),
   overdueGracePeriod: z.string().min(1),
+  overdueFeePerDay: z.string().min(1),
   kioskTimeout: z.string().min(1),
   accessionPrefix: z.string().min(1),
   currency: z.string().min(1),
@@ -68,6 +69,7 @@ function SettingsContent() {
       borrowingDays: String(settings?.borrowingDays || 14),
       maxRenewals: String(settings?.maxRenewals || 2),
       overdueGracePeriod: String(settings?.overdueGracePeriod || 0),
+      overdueFeePerDay: String(settings?.overdueFeePerDay || 0),
       kioskTimeout: String(settings?.kioskTimeout || 30),
       accessionPrefix: settings?.accessionPrefix || "B",
       currency: settings?.currency || "PHP",
@@ -87,6 +89,7 @@ function SettingsContent() {
         await setSetting({ key: "borrowingDays", value: parseInt(value.borrowingDays) });
         await setSetting({ key: "maxRenewals", value: parseInt(value.maxRenewals) });
         await setSetting({ key: "overdueGracePeriod", value: parseInt(value.overdueGracePeriod) });
+        await setSetting({ key: "overdueFeePerDay", value: parseInt(value.overdueFeePerDay) });
         await setSetting({ key: "kioskTimeout", value: parseInt(value.kioskTimeout) });
         await setSetting({ key: "accessionPrefix", value: value.accessionPrefix });
         await setSetting({ key: "currency", value: value.currency });
@@ -117,6 +120,7 @@ function SettingsContent() {
         borrowingDays: String(settings.borrowingDays || 14),
         maxRenewals: String(settings.maxRenewals || 2),
         overdueGracePeriod: String(settings.overdueGracePeriod || 0),
+        overdueFeePerDay: String(settings.overdueFeePerDay || 0),
         kioskTimeout: String(settings.kioskTimeout || 30),
         accessionPrefix: settings.accessionPrefix || "B",
         currency: settings.currency || "PHP",
@@ -269,7 +273,7 @@ function SettingsContent() {
             </CardTitle>
             <CardDescription className="text-xs">Configure borrowing periods and renewal policies</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-6 p-4 grid-cols-1 sm:grid-cols-3">
+          <CardContent className="grid gap-6 p-4 grid-cols-2 sm:grid-cols-4">
             <form.Field
               name="borrowingDays"
               children={(field) => (
@@ -321,6 +325,24 @@ function SettingsContent() {
                     className="text-sm"
                   />
                   <p className="text-[10px] text-muted-foreground">Before marking overdue</p>
+                </div>
+              )}
+            />
+            <form.Field
+              name="overdueFeePerDay"
+              children={(field) => (
+                <div className="space-y-2">
+                  <Label htmlFor={field.name} className="text-xs">Overdue Fee Per Day</Label>
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type="number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    className="text-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Fee charged per overdue day (0 = disabled)</p>
                 </div>
               )}
             />

@@ -23,7 +23,7 @@ async function requireLibrarian(ctx: any, roles?: string[]) {
   return librarian;
 }
 
-// Calculate due date excluding weekends and holidays
+// Calculate due date - includes weekends, only skips holidays
 async function calculateDueDate(ctx: any, borrowingDays: number): Promise<number> {
   const holidays = await ctx.db.query("holidays").collect();
   const holidayDates = new Set(
@@ -38,13 +38,9 @@ async function calculateDueDate(ctx: any, borrowingDays: number): Promise<number
 
   while (daysAdded < borrowingDays) {
     dueDate.setDate(dueDate.getDate() + 1);
-    const dayOfWeek = dueDate.getDay();
     const dateKey = `${dueDate.getFullYear()}-${dueDate.getMonth()}-${dueDate.getDate()}`;
 
-    // Skip weekends (0 = Sunday, 6 = Saturday)
-    if (dayOfWeek === 0 || dayOfWeek === 6) continue;
-
-    // Skip holidays
+    // Skip holidays only (weekends are now included)
     if (holidayDates.has(dateKey)) continue;
 
     daysAdded++;
@@ -55,14 +51,30 @@ async function calculateDueDate(ctx: any, borrowingDays: number): Promise<number
   return dueDate.getTime();
 }
 
-// Validate student can borrow
-async function validateBorrowing(ctx: any, studentId: any, bookId: any, overrideLimits = false) {
-  const student = await ctx.db.get(studentId);
-  if (!student) {
-    return { valid: false, error: "Student not found" };
+// Validate patron can borrow
+async function validateBorrowing(ctx: any, args: { studentId?: any; facultyId?: any }, bookId: any, overrideLimits = false) {
+  const { studentId, facultyId } = args;
+
+  if (!studentId && !facultyId) {
+    return { valid: false, error: "No patron specified" };
   }
-  if (student.isBlocked) {
-    return { valid: false, error: `Student is blocked: ${student.blockReason}` };
+
+  let patron: any = null;
+  let type = "";
+
+  if (studentId) {
+    patron = await ctx.db.get(studentId);
+    type = "student";
+  } else if (facultyId) {
+    patron = await ctx.db.get(facultyId);
+    type = "faculty";
+  }
+
+  if (!patron) {
+    return { valid: false, error: "Patron not found" };
+  }
+  if (patron.isBlocked) {
+    return { valid: false, error: `Patron is blocked: ${patron.blockReason}` };
   }
 
   const book = await ctx.db.get(bookId);
@@ -74,16 +86,22 @@ async function validateBorrowing(ctx: any, studentId: any, bookId: any, override
   }
 
   // Check active loans count
-  const activeLoans = await ctx.db
-    .query("transactions")
-    .withIndex("by_student", (q: any) => q.eq("studentId", studentId))
+  let activeLoansQuery = ctx.db.query("transactions");
+
+  if (type === "student") {
+    activeLoansQuery = activeLoansQuery.withIndex("by_student", (q: any) => q.eq("studentId", studentId));
+  } else {
+    activeLoansQuery = activeLoansQuery.withIndex("by_faculty", (q: any) => q.eq("facultyId", facultyId));
+  }
+
+  const activeLoans = await activeLoansQuery
     .filter((q: any) => q.eq(q.field("isReturned"), false))
     .collect();
 
-  if (!overrideLimits && activeLoans.length >= student.borrowingLimit) {
+  if (!overrideLimits && activeLoans.length >= patron.borrowingLimit) {
     return {
       valid: false,
-      error: `Borrowing limit reached (${activeLoans.length}/${student.borrowingLimit})`,
+      error: `Borrowing limit reached (${activeLoans.length}/${patron.borrowingLimit})`,
     };
   }
 
@@ -94,17 +112,18 @@ async function validateBorrowing(ctx: any, studentId: any, bookId: any, override
   if (overdueLoans.length > 0) {
     return {
       valid: false,
-      error: `Student has ${overdueLoans.length} overdue book(s)`,
+      error: `Patron has ${overdueLoans.length} overdue book(s)`,
     };
   }
 
-  return { valid: true, student, book, activeLoans };
+  return { valid: true, patron, book, activeLoans };
 }
 
 // Check out a book
 export const checkOut = mutation({
   args: {
-    studentId: v.id("students"),
+    studentId: v.optional(v.id("students")),
+    facultyId: v.optional(v.id("faculty")),
     bookId: v.id("books"),
     device: v.optional(v.string()),
     overrideLimits: v.optional(v.boolean()),
@@ -112,8 +131,17 @@ export const checkOut = mutation({
   handler: async (ctx, args) => {
     const librarian = await requireLibrarian(ctx);
 
+    if (!args.studentId && !args.facultyId) {
+      throw new Error("Must provide either studentId or facultyId");
+    }
+
     // Validate
-    const validation = await validateBorrowing(ctx, args.studentId, args.bookId, args.overrideLimits);
+    const validation = await validateBorrowing(
+      ctx,
+      { studentId: args.studentId, facultyId: args.facultyId },
+      args.bookId,
+      args.overrideLimits
+    );
     if (!validation.valid) {
       throw new Error(validation.error);
     }
@@ -138,6 +166,7 @@ export const checkOut = mutation({
     // Create transaction
     const transactionId = await ctx.db.insert("transactions", {
       studentId: args.studentId,
+      facultyId: args.facultyId,
       bookId: args.bookId,
       librarianId: librarian._id,
       checkoutDate: Date.now(),
@@ -166,6 +195,7 @@ export const checkOut = mutation({
       entityId: transactionId,
       details: JSON.stringify({
         studentId: args.studentId,
+        facultyId: args.facultyId,
         bookId: args.bookId,
         dueDate,
       }),
@@ -198,8 +228,51 @@ export const checkIn = mutation({
       throw new Error("No active loan found for this book");
     }
 
+    // Get overdue grace period
+    const gracePeriodSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "overdueGracePeriod"))
+      .first();
+    const gracePeriodDays = Number(gracePeriodSetting?.value ?? 0);
+    const gracePeriodMs = gracePeriodDays * 24 * 60 * 60 * 1000;
+
+    // Get overdue fee per day
+    const overdueFeePerDaySetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "overdueFeePerDay"))
+      .first();
+    const overdueFeePerDay = Number(overdueFeePerDaySetting?.value ?? 0);
+
     const returnDate = Date.now();
-    const wasOverdue = transaction.dueDate < returnDate;
+    // Book is overdue if returned after due date + grace period
+    const wasOverdue = transaction.dueDate + gracePeriodMs < returnDate;
+
+    // Calculate days overdue and fee
+    const daysOverdue = wasOverdue
+      ? Math.floor((returnDate - transaction.dueDate) / (24 * 60 * 60 * 1000))
+      : 0;
+    const overdueFee = daysOverdue * overdueFeePerDay;
+
+    // Update patron's outstanding fees if there's a fee
+    if (overdueFee > 0) {
+      if (transaction.studentId) {
+        const student = await ctx.db.get(transaction.studentId);
+        if (student) {
+          await ctx.db.patch(transaction.studentId, {
+            outstandingFees: (student.outstandingFees ?? 0) + overdueFee,
+            updatedAt: Date.now(),
+          });
+        }
+      } else if (transaction.facultyId) {
+        const faculty = await ctx.db.get(transaction.facultyId);
+        if (faculty) {
+          await ctx.db.patch(transaction.facultyId, {
+            outstandingFees: (faculty.outstandingFees ?? 0) + overdueFee,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    }
 
     // Update transaction
     await ctx.db.patch(transaction._id, {
@@ -224,11 +297,11 @@ export const checkIn = mutation({
       entityId: transaction._id,
       details: JSON.stringify({
         studentId: transaction.studentId,
+        facultyId: transaction.facultyId,
         bookId: args.bookId,
         wasOverdue,
-        daysOverdue: wasOverdue
-          ? Math.floor((returnDate - transaction.dueDate) / (24 * 60 * 60 * 1000))
-          : 0,
+        daysOverdue,
+        overdueFee,
       }),
       device: args.device,
       timestamp: Date.now(),
@@ -237,9 +310,8 @@ export const checkIn = mutation({
     return {
       transactionId: transaction._id,
       wasOverdue,
-      daysOverdue: wasOverdue
-        ? Math.floor((returnDate - transaction.dueDate) / (24 * 60 * 60 * 1000))
-        : 0,
+      daysOverdue,
+      overdueFee,
     };
   },
 });
@@ -319,12 +391,15 @@ export const getActive = query({
     // Enrich with student and book data
     const enriched = await Promise.all(
       transactions.map(async (t: any) => {
-        const student = await ctx.db.get(t.studentId);
+        let patron = null;
+        if (t.studentId) patron = await ctx.db.get(t.studentId);
+        else if (t.facultyId) patron = await ctx.db.get(t.facultyId);
+
         const book = await ctx.db.get(t.bookId);
         const librarian = t.librarianId
           ? await ctx.db.get(t.librarianId)
           : null;
-        return { ...t, student, book, librarian };
+        return { ...t, student: patron, book, librarian }; // Keeping 'student' key for backward compat or updating frontend
       })
     );
 
@@ -338,20 +413,31 @@ export const getOverdue = query({
   handler: async (ctx) => {
     await requireLibrarian(ctx);
 
+    // Get overdue grace period
+    const gracePeriodSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "overdueGracePeriod"))
+      .first();
+    const gracePeriodDays = Number(gracePeriodSetting?.value ?? 0);
+    const gracePeriodMs = gracePeriodDays * 24 * 60 * 60 * 1000;
+
     const now = Date.now();
     const transactions = await ctx.db
       .query("transactions")
       .withIndex("by_returned", (q: any) => q.eq("isReturned", false))
-      .filter((q: any) => q.lt(q.field("dueDate"), now))
+      .filter((q: any) => q.lt(q.field("dueDate"), now - gracePeriodMs))
       .collect();
 
     // Enrich with student and book data
     const enriched = await Promise.all(
       transactions.map(async (t: any) => {
-        const student = await ctx.db.get(t.studentId);
+        let patron = null;
+        if (t.studentId) patron = await ctx.db.get(t.studentId);
+        else if (t.facultyId) patron = await ctx.db.get(t.facultyId);
+
         const book = await ctx.db.get(t.bookId);
         const daysOverdue = Math.floor((now - t.dueDate) / (24 * 60 * 60 * 1000));
-        return { ...t, student, book, daysOverdue };
+        return { ...t, student: patron, book, daysOverdue };
       })
     );
 
@@ -389,6 +475,33 @@ export const getStudentHistory = query({
   },
 });
 
+// Get faculty's borrowing history
+export const getFacultyHistory = query({
+  args: {
+    facultyId: v.id("faculty"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireLibrarian(ctx);
+
+    const transactions = await ctx.db
+      .query("transactions")
+      .withIndex("by_faculty", (q: any) => q.eq("facultyId", args.facultyId))
+      .order("desc")
+      .take(args.limit ?? 50);
+
+    // Enrich with book data
+    const enriched = await Promise.all(
+      transactions.map(async (t: any) => {
+        const book = await ctx.db.get(t.bookId);
+        return { ...t, book };
+      })
+    );
+
+    return enriched;
+  },
+});
+
 // Get recent transactions
 export const getRecent = query({
   args: { limit: v.optional(v.number()) },
@@ -403,9 +516,12 @@ export const getRecent = query({
     // Enrich with student and book data
     const enriched = await Promise.all(
       transactions.map(async (t: any) => {
-        const student = await ctx.db.get(t.studentId);
+        let patron = null;
+        if (t.studentId) patron = await ctx.db.get(t.studentId);
+        else if (t.facultyId) patron = await ctx.db.get(t.facultyId);
+
         const book = await ctx.db.get(t.bookId);
-        return { ...t, student, book };
+        return { ...t, student: patron, book };
       })
     );
 
@@ -436,10 +552,18 @@ export const getStats = query({
     const checkins = inPeriod.filter((t: any) => t.isReturned).length;
     const overdueReturns = inPeriod.filter((t: any) => t.isOverdue).length;
 
+    // Get overdue grace period
+    const gracePeriodSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "overdueGracePeriod"))
+      .first();
+    const gracePeriodDays = Number(gracePeriodSetting?.value ?? 0);
+    const gracePeriodMs = gracePeriodDays * 24 * 60 * 60 * 1000;
+
     // Current active loans
     const activeLoans = allTransactions.filter((t: any) => !t.isReturned);
     const currentOverdue = activeLoans.filter(
-      (t: any) => t.dueDate < now
+      (t: any) => t.dueDate + gracePeriodMs < now
     ).length;
 
     // Average loan duration
@@ -468,12 +592,13 @@ export const getStats = query({
 // Validate borrowing (for pre-check warnings)
 export const validateBorrow = query({
   args: {
-    studentId: v.id("students"),
+    studentId: v.optional(v.id("students")),
+    facultyId: v.optional(v.id("faculty")),
     bookId: v.id("books"),
   },
   handler: async (ctx, args) => {
     await requireLibrarian(ctx);
-    return await validateBorrowing(ctx, args.studentId, args.bookId);
+    return await validateBorrowing(ctx, { studentId: args.studentId, facultyId: args.facultyId }, args.bookId);
   },
 });
 
@@ -552,6 +677,7 @@ export const getCirculationByGrade = query({
     const grades: Record<number, { checkouts: number; students: Set<string> }> = {};
 
     for (const t of inRange) {
+      if (!t.studentId) continue; // Skip faculty/non-student transactions
       const student = studentMap.get(t.studentId.toString());
       if (!student) continue;
 
@@ -628,37 +754,57 @@ export const getOverdueReport = query({
   handler: async (ctx) => {
     await requireLibrarian(ctx);
 
+    // Get overdue grace period
+    const gracePeriodSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q: any) => q.eq("key", "overdueGracePeriod"))
+      .first();
+    const gracePeriodDays = Number(gracePeriodSetting?.value ?? 0);
+    const gracePeriodMs = gracePeriodDays * 24 * 60 * 60 * 1000;
+
     const now = Date.now();
     const transactions = await ctx.db
       .query("transactions")
       .withIndex("by_returned", (q: any) => q.eq("isReturned", false))
       .collect();
 
-    const overdue = transactions.filter((t: any) => t.dueDate < now);
+    const overdue = transactions.filter((t: any) => t.dueDate + gracePeriodMs < now);
 
     // Enrich with student and book data
     const enriched = await Promise.all(
       overdue.map(async (t: any) => {
-        const student = await ctx.db.get(t.studentId);
+        let patron: any = null;
+        let patronType = "";
+
+        if (t.studentId) {
+          patron = await ctx.db.get(t.studentId);
+          patronType = "student";
+        } else if (t.facultyId) {
+          patron = await ctx.db.get(t.facultyId);
+          patronType = "faculty";
+        }
+
         const book = await ctx.db.get(t.bookId);
         const daysOverdue = Math.floor((now - t.dueDate) / (24 * 60 * 60 * 1000));
 
-        // Type assertion for student and book
-        const studentData = student as { name?: string; studentId?: string; gradeLevel?: number; phone?: string; guardianPhone?: string } | null;
+        // Type assertion for student/faculty and book
+        const patronData = patron as { name?: string; studentId?: string; facultyId?: string; gradeLevel?: number; department?: string; phone?: string; guardianPhone?: string } | null;
         const bookData = book as { title?: string; accessionNumber?: string; replacementCost?: number } | null;
 
         return {
           transactionId: t._id,
-          studentName: studentData?.name || "Unknown",
-          studentId: studentData?.studentId || "Unknown",
-          gradeLevel: studentData?.gradeLevel,
-          phone: studentData?.phone || studentData?.guardianPhone,
+          studentName: patronData?.name || "Unknown",
+          studentId: patronData?.studentId || patronData?.facultyId || "Unknown",
+          // Use gradeLevel for students, department for faculty in the report if needed
+          gradeLevel: patronData?.gradeLevel ?? (patronData?.department ? "FA" : undefined),
+          phone: patronData?.phone || patronData?.guardianPhone,
           bookTitle: bookData?.title || "Unknown",
           accessionNumber: bookData?.accessionNumber,
           replacementCost: bookData?.replacementCost || 0,
           dueDate: t.dueDate,
           daysOverdue,
           checkoutDate: t.checkoutDate,
+          patronType,
         };
       })
     );

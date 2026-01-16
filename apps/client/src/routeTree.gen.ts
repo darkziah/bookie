@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as StudentsRouteImport } from './routes/students'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as ProfileRouteImport } from './routes/profile'
@@ -21,15 +20,14 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CirculationRouteImport } from './routes/circulation'
 import { Route as CatalogRouteImport } from './routes/catalog'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as StudentIndexRouteImport } from './routes/student/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
+import { Route as FacultyIndexRouteImport } from './routes/faculty/index'
+import { Route as StudentStudentIdRouteImport } from './routes/student/$studentId'
 import { Route as SettingsMembersRouteImport } from './routes/settings/members'
 import { Route as SettingsImportRouteImport } from './routes/settings/import'
+import { Route as FacultyFacultyIdRouteImport } from './routes/faculty/$facultyId'
 
-const StudentsRoute = StudentsRouteImport.update({
-  id: '/students',
-  path: '/students',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SetupRoute = SetupRouteImport.update({
   id: '/setup',
   path: '/setup',
@@ -85,9 +83,24 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StudentIndexRoute = StudentIndexRouteImport.update({
+  id: '/student/',
+  path: '/student/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FacultyIndexRoute = FacultyIndexRouteImport.update({
+  id: '/faculty/',
+  path: '/faculty/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudentStudentIdRoute = StudentStudentIdRouteImport.update({
+  id: '/student/$studentId',
+  path: '/student/$studentId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsMembersRoute = SettingsMembersRouteImport.update({
@@ -98,6 +111,11 @@ const SettingsMembersRoute = SettingsMembersRouteImport.update({
 const SettingsImportRoute = SettingsImportRouteImport.update({
   id: '/settings/import',
   path: '/settings/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FacultyFacultyIdRoute = FacultyFacultyIdRouteImport.update({
+  id: '/faculty/$facultyId',
+  path: '/faculty/$facultyId',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -113,10 +131,13 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRoute
   '/reports': typeof ReportsRoute
   '/setup': typeof SetupRoute
-  '/students': typeof StudentsRoute
+  '/faculty/$facultyId': typeof FacultyFacultyIdRoute
   '/settings/import': typeof SettingsImportRoute
   '/settings/members': typeof SettingsMembersRoute
+  '/student/$studentId': typeof StudentStudentIdRoute
+  '/faculty': typeof FacultyIndexRoute
   '/settings': typeof SettingsIndexRoute
+  '/student': typeof StudentIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -130,10 +151,13 @@ export interface FileRoutesByTo {
   '/profile': typeof ProfileRoute
   '/reports': typeof ReportsRoute
   '/setup': typeof SetupRoute
-  '/students': typeof StudentsRoute
+  '/faculty/$facultyId': typeof FacultyFacultyIdRoute
   '/settings/import': typeof SettingsImportRoute
   '/settings/members': typeof SettingsMembersRoute
+  '/student/$studentId': typeof StudentStudentIdRoute
+  '/faculty': typeof FacultyIndexRoute
   '/settings': typeof SettingsIndexRoute
+  '/student': typeof StudentIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -148,10 +172,13 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRoute
   '/reports': typeof ReportsRoute
   '/setup': typeof SetupRoute
-  '/students': typeof StudentsRoute
+  '/faculty/$facultyId': typeof FacultyFacultyIdRoute
   '/settings/import': typeof SettingsImportRoute
   '/settings/members': typeof SettingsMembersRoute
+  '/student/$studentId': typeof StudentStudentIdRoute
+  '/faculty/': typeof FacultyIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/student/': typeof StudentIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -167,10 +194,13 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reports'
     | '/setup'
-    | '/students'
+    | '/faculty/$facultyId'
     | '/settings/import'
     | '/settings/members'
+    | '/student/$studentId'
+    | '/faculty'
     | '/settings'
+    | '/student'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -184,10 +214,13 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reports'
     | '/setup'
-    | '/students'
+    | '/faculty/$facultyId'
     | '/settings/import'
     | '/settings/members'
+    | '/student/$studentId'
+    | '/faculty'
     | '/settings'
+    | '/student'
   id:
     | '__root__'
     | '/'
@@ -201,10 +234,13 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reports'
     | '/setup'
-    | '/students'
+    | '/faculty/$facultyId'
     | '/settings/import'
     | '/settings/members'
+    | '/student/$studentId'
+    | '/faculty/'
     | '/settings/'
+    | '/student/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -219,21 +255,17 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   ReportsRoute: typeof ReportsRoute
   SetupRoute: typeof SetupRoute
-  StudentsRoute: typeof StudentsRoute
+  FacultyFacultyIdRoute: typeof FacultyFacultyIdRoute
   SettingsImportRoute: typeof SettingsImportRoute
   SettingsMembersRoute: typeof SettingsMembersRoute
+  StudentStudentIdRoute: typeof StudentStudentIdRoute
+  FacultyIndexRoute: typeof FacultyIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
+  StudentIndexRoute: typeof StudentIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/students': {
-      id: '/students'
-      path: '/students'
-      fullPath: '/students'
-      preLoaderRoute: typeof StudentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/setup': {
       id: '/setup'
       path: '/setup'
@@ -311,11 +343,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/student/': {
+      id: '/student/'
+      path: '/student'
+      fullPath: '/student'
+      preLoaderRoute: typeof StudentIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/': {
       id: '/settings/'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/faculty/': {
+      id: '/faculty/'
+      path: '/faculty'
+      fullPath: '/faculty'
+      preLoaderRoute: typeof FacultyIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/student/$studentId': {
+      id: '/student/$studentId'
+      path: '/student/$studentId'
+      fullPath: '/student/$studentId'
+      preLoaderRoute: typeof StudentStudentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/members': {
@@ -330,6 +383,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/import'
       fullPath: '/settings/import'
       preLoaderRoute: typeof SettingsImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/faculty/$facultyId': {
+      id: '/faculty/$facultyId'
+      path: '/faculty/$facultyId'
+      fullPath: '/faculty/$facultyId'
+      preLoaderRoute: typeof FacultyFacultyIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -347,10 +407,13 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   ReportsRoute: ReportsRoute,
   SetupRoute: SetupRoute,
-  StudentsRoute: StudentsRoute,
+  FacultyFacultyIdRoute: FacultyFacultyIdRoute,
   SettingsImportRoute: SettingsImportRoute,
   SettingsMembersRoute: SettingsMembersRoute,
+  StudentStudentIdRoute: StudentStudentIdRoute,
+  FacultyIndexRoute: FacultyIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
+  StudentIndexRoute: StudentIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

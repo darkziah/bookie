@@ -70,10 +70,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     ...(permissions.canViewStudents
       ? [
         {
-          title: "Students",
-          url: "/students",
+          title: "Student",
+          url: "/student",
           icon: IconUsers,
-          isActive: location.pathname.startsWith("/students"),
+          isActive: location.pathname.startsWith("/student"),
+        },
+      ]
+      : []),
+    ...(permissions.canViewStudents
+      ? [
+        {
+          title: "Faculty",
+          url: "/faculty",
+          icon: IconUsers,
+          isActive: location.pathname.startsWith("/faculty"),
         },
       ]
       : []),

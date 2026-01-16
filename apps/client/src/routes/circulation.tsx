@@ -202,7 +202,9 @@ function CirculationContent() {
 }
 
 function CheckoutFlow() {
+  const [patronType, setPatronType] = useState<"student" | "faculty">("student");
   const [studentId, setStudentId] = useState("");
+  const [facultyId, setFacultyId] = useState("");
   const [bookAccession, setBookAccession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -210,10 +212,17 @@ function CheckoutFlow() {
 
   const checkOut = useMutation(api.transactions.checkOut);
 
+
   // Real-time student lookup
   const studentData = useQuery(
     api.students.getByStudentId,
-    studentId.trim() ? { studentId: studentId.trim() } : "skip"
+    studentId.trim() && patronType === "student" ? { studentId: studentId.trim() } : "skip"
+  );
+
+  // Real-time faculty lookup
+  const facultyData = useQuery(
+    api.faculty.getByFacultyId,
+    facultyId.trim() && patronType === "faculty" ? { facultyId: facultyId.trim() } : "skip"
   );
 
   // Real-time book lookup
@@ -222,28 +231,30 @@ function CheckoutFlow() {
     bookAccession.trim() ? { accessionNumber: bookAccession.trim() } : "skip"
   );
 
-  const student = studentData;
+  const patron = patronType === "student" ? studentData : facultyData;
+  const isPatronLoading = patronType === "student" ? studentData === undefined : facultyData === undefined;
+  const patronId = patronType === "student" ? studentId : facultyId;
   const book = bookData;
 
   // Validation logic
   const validationIssues: { type: "error" | "warning"; message: string }[] = [];
 
-  if (student?.isBlocked) {
+  if (patron?.isBlocked) {
     validationIssues.push({
       type: "error",
-      message: `Student is blocked${student.blockReason ? `: ${student.blockReason}` : ""}`,
+      message: `${patronType === "student" ? "Student" : "Faculty"} is blocked${patron.blockReason ? `: ${patron.blockReason}` : ""}`,
     });
   }
-  if (student?.hasOverdue) {
+  if (patron?.hasOverdue) {
     validationIssues.push({
       type: "warning",
-      message: "Student has overdue books",
+      message: `${patronType === "student" ? "Student" : "Faculty"} has overdue books`,
     });
   }
-  if (student && student.activeLoanCount >= student.borrowingLimit) {
+  if (patron && patron.activeLoanCount >= patron.borrowingLimit) {
     validationIssues.push({
       type: overrideLimits ? "warning" : "error",
-      message: `Borrowing limit reached (${student.activeLoanCount}/${student.borrowingLimit})${overrideLimits ? " - Override Active" : ""}`,
+      message: `Borrowing limit reached (${patron.activeLoanCount}/${patron.borrowingLimit})${overrideLimits ? " - Override Active" : ""}`,
     });
   }
   if (book && book.status !== "available") {
@@ -254,19 +265,26 @@ function CheckoutFlow() {
   }
 
   const hasErrors = validationIssues.some((v) => v.type === "error");
-  const canCheckout = student && book && !hasErrors;
+  const canCheckout = patron && book && !hasErrors;
 
   const handleCheckout = async () => {
-    if (!student || !book) return;
+    if (!patron || !book) return;
 
     try {
       setIsLoading(true);
-      const result = await checkOut({
-        studentId: student._id as Id<"students">,
+      const args: any = {
         bookId: book._id as Id<"books">,
         device: "admin_dashboard",
         overrideLimits,
-      });
+      };
+
+      if (patronType === "student") {
+        args.studentId = patron._id as Id<"students">;
+      } else {
+        args.facultyId = patron._id as Id<"faculty">;
+      }
+
+      const result = await checkOut(args);
 
       toast.success("Book checked out successfully!", {
         description: `Due: ${format(new Date(result.dueDate), "MMM d, yyyy")}`,
@@ -287,54 +305,80 @@ function CheckoutFlow() {
 
   const handleReset = () => {
     setStudentId("");
+    setFacultyId("");
     setBookAccession("");
     setOverrideLimits(false);
   };
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <h3 className="font-medium text-sm">Patron</h3>
+        <div className="flex bg-muted rounded-lg p-1">
+          <button
+            className={`text-xs px-3 py-1 rounded-md transition-all ${patronType === "student" ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => { setPatronType("student"); setFacultyId(""); }}
+          >
+            Student
+          </button>
+          <button
+            className={`text-xs px-3 py-1 rounded-md transition-all ${patronType === "faculty" ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => { setPatronType("faculty"); setStudentId(""); }}
+          >
+            Faculty
+          </button>
+        </div>
+      </div>
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Student Scanner */}
+        {/* Patron Scanner */}
         <div className="space-y-4">
+
+
           <StudentScanner
-            onScan={(id) => setStudentId(id)}
+            label={patronType === "student" ? "Scan Student ID" : "Scan Faculty ID"}
+            onScan={(id) => patronType === "student" ? setStudentId(id) : setFacultyId(id)}
             onError={(err) => toast.error("Scanner error", { description: err })}
           />
 
-          {/* Student Preview */}
-          {studentId && (
+          {/* Patron Preview */}
+          {patronId && (
             <div>
-              {studentData === undefined ? (
+              {isPatronLoading ? (
                 <Card>
                   <CardContent className="py-4 flex items-center gap-2 text-muted-foreground text-sm">
                     <IconLoader2 className="h-4 w-4 animate-spin" />
-                    Looking up student...
+                    Looking up {patronType}...
                   </CardContent>
                 </Card>
-              ) : student ? (
-                <Card className={student.isBlocked ? "border-destructive bg-destructive/5" : ""}>
+              ) : patron ? (
+                <Card className={patron.isBlocked ? "border-destructive bg-destructive/5" : ""}>
                   <CardContent className="py-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold">{student.name}</span>
-                      <Badge variant={student.isBlocked ? "destructive" : "secondary"} className="text-[10px]">
-                        Grade {student.gradeLevel}
+                      <span className="font-semibold">{patron.name}</span>
+                      <Badge variant={patron.isBlocked ? "destructive" : "secondary"} className="text-[10px]">
+                        {patronType === "student" ? `Grade ${(patron as any).gradeLevel}` : (patron as any).department || "Faculty"}
                       </Badge>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      ID: {student.studentId}
+                      ID: {patronType === "student" ? (patron as any).studentId : (patron as any).facultyId}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className={student.activeLoanCount >= student.borrowingLimit ? "text-destructive font-medium" : "text-muted-foreground"}>
-                        Books: {student.activeLoanCount}/{student.borrowingLimit}
+                      <span className={patron.activeLoanCount >= patron.borrowingLimit ? "text-destructive font-medium" : "text-muted-foreground"}>
+                        Books: {patron.activeLoanCount}/{patron.borrowingLimit}
                       </span>
-                      {student.isBlocked && (
+                      {patron.isBlocked && (
                         <span className="text-destructive flex items-center gap-1 font-medium">
                           <IconX className="h-3 w-3" /> Blocked
                         </span>
                       )}
-                      {student.hasOverdue && (
+                      {patron.hasOverdue && (
                         <span className="text-amber-500 flex items-center gap-1 font-medium">
                           <IconAlertTriangle className="h-3 w-3" /> Overdue
+                        </span>
+                      )}
+                      {((patron as any).outstandingFees ?? 0) > 0 && (
+                        <span className="text-red-600 font-medium">
+                          Balance: ₱{((patron as any).outstandingFees ?? 0).toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -344,7 +388,7 @@ function CheckoutFlow() {
                 <Card className="border-destructive bg-destructive/5">
                   <CardContent className="py-4 flex items-center gap-2 text-destructive text-sm font-medium">
                     <IconX className="h-4 w-4 shrink-0" />
-                    Student not found: {studentId}
+                    {patronType === "student" ? "Student" : "Faculty"} not found: {patronId}
                   </CardContent>
                 </Card>
               )}
@@ -354,6 +398,7 @@ function CheckoutFlow() {
 
         {/* Book Scanner */}
         <div className="space-y-4">
+
           <BookScanner
             onScan={(acc) => setBookAccession(acc)}
             onError={(err) => toast.error("Scanner error", { description: err })}
@@ -422,7 +467,7 @@ function CheckoutFlow() {
       )}
 
       {/* Override Option */}
-      {student && student.activeLoanCount >= student.borrowingLimit && (
+      {patron && patron.activeLoanCount >= patron.borrowingLimit && (
         <div className="flex items-center space-x-2 py-2">
           <Checkbox
             id="override-limit"
@@ -450,7 +495,7 @@ function CheckoutFlow() {
           <IconCheck className="mr-2 h-4 w-4" />
           Check Out Book
         </Button>
-        {(studentId || bookAccession) && (
+        {(patronId || bookAccession) && (
           <Button variant="outline" size="lg" onClick={handleReset}>
             <IconRefresh className="mr-2 h-4 w-4" />
             Reset
@@ -468,12 +513,12 @@ function CheckoutFlow() {
             </DialogDescription>
           </DialogHeader>
 
-          {student && book && (
+          {patron && book && (
             <div className="space-y-4 py-4">
               <div className="p-3 bg-muted rounded-lg space-y-1">
-                <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Student</p>
-                <p className="font-semibold text-sm">{student.name}</p>
-                <p className="text-xs text-muted-foreground">Grade {student.gradeLevel}</p>
+                <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{patronType}</p>
+                <p className="font-semibold text-sm">{patron.name}</p>
+                <p className="text-xs text-muted-foreground">{patronType === "student" ? `Grade ${(patron as any).gradeLevel}` : (patron as any).department}</p>
               </div>
               <div className="p-3 bg-muted rounded-lg space-y-1">
                 <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Book</p>

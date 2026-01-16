@@ -61,6 +61,7 @@ export default defineSchema({
     guardianPhone: v.optional(v.string()),
     photoId: v.optional(v.id("_storage")),
     borrowingLimit: v.number(),
+    outstandingFees: v.optional(v.number()), // Total unpaid fees
     isBlocked: v.boolean(),
     blockReason: v.optional(v.string()),
     createdAt: v.number(),
@@ -68,6 +69,27 @@ export default defineSchema({
   })
     .index("by_studentId", ["studentId"])
     .index("by_grade", ["gradeLevel"])
+    .index("by_blocked", ["isBlocked"])
+    .searchIndex("search_name", { searchField: "name" }),
+
+  // Faculty/Staff patrons
+  faculty: defineTable({
+    facultyId: v.string(), // Employee ID or similar
+    name: v.string(),
+    email: v.optional(v.string()),
+    department: v.string(),
+    phone: v.optional(v.string()), // Mobile number
+    photoId: v.optional(v.id("_storage")),
+    borrowingLimit: v.number(),
+    outstandingFees: v.optional(v.number()), // Total unpaid fees
+    isBlocked: v.boolean(),
+    blockReason: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_facultyId", ["facultyId"])
+    .index("by_department", ["department"])
+    .index("by_email", ["email"])
     .index("by_blocked", ["isBlocked"])
     .searchIndex("search_name", { searchField: "name" }),
 
@@ -123,7 +145,8 @@ export default defineSchema({
 
   // Circulation transactions
   transactions: defineTable({
-    studentId: v.id("students"),
+    studentId: v.optional(v.id("students")),
+    facultyId: v.optional(v.id("faculty")),
     bookId: v.id("books"),
     librarianId: v.optional(v.id("librarians")),
     checkoutDate: v.number(),
@@ -137,11 +160,32 @@ export default defineSchema({
     notes: v.optional(v.string()),
   })
     .index("by_student", ["studentId"])
+    .index("by_faculty", ["facultyId"]) // New index
     .index("by_book", ["bookId"])
     .index("by_returned", ["isReturned"])
     .index("by_overdue", ["isOverdue"])
     .index("by_checkout_date", ["checkoutDate"])
     .index("by_due_date", ["dueDate"]),
+
+  // Fee payments tracking
+  feePayments: defineTable({
+    studentId: v.optional(v.id("students")),
+    facultyId: v.optional(v.id("faculty")),
+    transactionId: v.optional(v.id("transactions")), // Related transaction if applicable
+    amount: v.number(),
+    reason: v.union(
+      v.literal("overdue"),
+      v.literal("lost_book"),
+      v.literal("damaged_book"),
+      v.literal("other")
+    ),
+    notes: v.optional(v.string()),
+    paidAt: v.number(),
+    receivedBy: v.id("librarians"),
+  })
+    .index("by_student", ["studentId"])
+    .index("by_faculty", ["facultyId"])
+    .index("by_paid_at", ["paidAt"]),
 
   // Philippine school holidays/closures
   holidays: defineTable({

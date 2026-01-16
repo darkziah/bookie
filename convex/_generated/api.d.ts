@@ -11,6 +11,8 @@
 import type * as auth from "../auth.js";
 import type * as books from "../books.js";
 import type * as crons from "../crons.js";
+import type * as faculty from "../faculty.js";
+import type * as fees from "../fees.js";
 import type * as holidays from "../holidays.js";
 import type * as http from "../http.js";
 import type * as kiosk from "../kiosk.js";
@@ -30,6 +32,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   books: typeof books;
   crons: typeof crons;
+  faculty: typeof faculty;
+  fees: typeof fees;
   holidays: typeof holidays;
   http: typeof http;
   kiosk: typeof kiosk;

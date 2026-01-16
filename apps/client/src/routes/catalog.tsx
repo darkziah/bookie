@@ -46,6 +46,7 @@ import {
   IconLoader2,
   IconEdit,
   IconBarcode,
+  IconTrash,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { BarcodeScanner } from "@/components/scanner/barcode-scanner";
@@ -216,6 +217,19 @@ function CatalogContent() {
 function BookRow({ book }: { book: any }) {
   const [showEditDialog, setShowEditDialog] = useState(false);
 
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const deleteBook = useMutation(api.books.remove);
+
+  const handleDelete = async () => {
+    try {
+      await deleteBook({ id: book._id as Id<"books"> });
+      toast.success("Book deleted successfully");
+      setShowDeleteDialog(false);
+    } catch (error: any) {
+      toast.error("Failed to delete book", { description: error.message });
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "available":
@@ -251,18 +265,47 @@ function BookRow({ book }: { book: any }) {
         <TableCell className="hidden md:table-cell text-sm">{book.category || "-"}</TableCell>
         <TableCell>{getStatusBadge(book.status)}</TableCell>
         <TableCell className="text-right">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowEditDialog(true)}
-          >
-            <IconEdit className="h-4 w-4" />
-          </Button>
+          <div className="flex justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowEditDialog(true)}
+            >
+              <IconEdit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              onClick={() => setShowDeleteDialog(true)}
+            >
+              <IconTrash className="h-4 w-4" />
+            </Button>
+          </div>
         </TableCell>
       </TableRow>
 
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
         <EditBookDialog book={book} onClose={() => setShowEditDialog(false)} />
+      </Dialog>
+
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Book</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>{book.title}</strong>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </>
   );
@@ -302,7 +345,7 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
       category: "general",
       publisher: "",
       publishYear: "",
-      replacementCost: "500",
+      replacementCost: "0",
       location: "",
       pages: "",
       coverUrl: "",

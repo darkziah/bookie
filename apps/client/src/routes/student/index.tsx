@@ -1,8 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
 import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, usePaginatedQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@bookie/ui/components/ui/button";
@@ -61,7 +61,7 @@ const studentSchema = z.object({
   contactNumber: z.string(),
 });
 
-export const Route = createFileRoute("/students")({
+export const Route = createFileRoute("/student/")({
   component: StudentsPage,
 });
 
@@ -78,9 +78,17 @@ function StudentsContent() {
   const [gradeFilter, setGradeFilter] = useState<string>("");
   const [showAddDialog, setShowAddDialog] = useState(false);
 
-  const studentsData = useQuery(api.students.list, {
-    gradeLevel: gradeFilter ? Number(gradeFilter) : undefined,
-  });
+  const {
+    results: students,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.students.paginatedList,
+    {
+      gradeLevel: gradeFilter && gradeFilter !== "all" ? Number(gradeFilter) : undefined,
+    },
+    { initialNumItems: 20 }
+  );
 
   const searchResults = useQuery(
     api.students.search,
@@ -89,7 +97,8 @@ function StudentsContent() {
 
   const statsData = useQuery(api.students.getStats, {});
 
-  const students = searchQuery.trim().length >= 2 ? searchResults : studentsData;
+  const displayedStudents = searchQuery.trim().length >= 2 ? searchResults : students;
+  const isLoading = status === "LoadingFirstPage";
 
   return (
     <div className="flex flex-col gap-6">
@@ -161,11 +170,11 @@ function StudentsContent() {
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            {students === undefined ? (
+            {isLoading || displayedStudents === undefined ? (
               <div className="flex items-center justify-center py-12">
                 <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : students.length === 0 ? (
+            ) : displayedStudents.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center px-4">
                 <IconUser className="h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-lg font-medium">No students found</p>
@@ -186,13 +195,23 @@ function StudentsContent() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {students.map((student: any) => (
+                  {displayedStudents.map((student: any) => (
                     <StudentRow key={student._id} student={student} />
                   ))}
                 </TableBody>
               </Table>
             )}
           </div>
+          {status === "CanLoadMore" && !searchQuery && (
+            <div className="p-4 flex justify-center border-t">
+              <Button
+                variant="outline"
+                onClick={() => loadMore(20)}
+              >
+                Load More
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -231,7 +250,11 @@ function StudentRow({ student }: { student: any }) {
       <TableRow>
         <TableCell className="font-mono text-xs sm:text-sm">{student.studentId}</TableCell>
         <TableCell>
-          <div className="font-medium text-sm sm:text-base">{student.name}</div>
+          <div className="font-medium text-sm sm:text-base">
+            <Link to="/student/$studentId" params={{ studentId: student._id }} className="hover:underline">
+              {student.name}
+            </Link>
+          </div>
           <div className="md:hidden text-[10px] text-muted-foreground">
             Grade {student.gradeLevel} {student.section ? `• ${student.section}` : ""}
           </div>

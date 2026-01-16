@@ -66,7 +66,7 @@ export function NavMain({
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link to="/students" className="flex items-center gap-2 cursor-pointer">
+                  <Link to="/student" className="flex items-center gap-2 cursor-pointer">
                     <IconUsers className="size-4" />
                     <span>Add Student</span>
                   </Link>
