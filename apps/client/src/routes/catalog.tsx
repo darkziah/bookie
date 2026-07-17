@@ -358,7 +358,7 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
         setIsLoading(true);
 
         // Upload cover image if selected
-        let coverStorageId: string | undefined;
+        let coverStorageId: Id<"_storage"> | undefined;
         if (coverFile) {
           setIsUploading(true);
           const uploadUrl = await generateUploadUrl();
@@ -368,7 +368,7 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
             body: coverFile,
           });
           const { storageId } = await result.json();
-          coverStorageId = storageId;
+          coverStorageId = storageId as Id<"_storage">;
           setIsUploading(false);
         }
 
@@ -387,6 +387,7 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
             : 500,
           location: value.location || "General",
           pages: value.pages ? Number(value.pages) : undefined,
+          coverId: coverStorageId,
           condition: "good",
         });
         toast.success("Book added successfully!");

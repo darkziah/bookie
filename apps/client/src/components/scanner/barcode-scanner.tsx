@@ -155,15 +155,6 @@ export function BarcodeScanner({
     setCameraFacing((prev) => (prev === "environment" ? "user" : "environment"));
   }, []);
 
-  const handleManualSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (manualEntry.trim()) {
-      onScan(manualEntry.trim());
-      setManualEntry("");
-    }
-  };
-
-  // Determine if we should use fullscreen mode
   const useFullscreen = isScanning && isMobile && fullscreenOnMobile;
 
   // Scanner content with overlay
@@ -325,25 +316,38 @@ export function BarcodeScanner({
 
         {/* Manual Entry */}
         {showManualEntry && (
-          <form onSubmit={handleManualSubmit} className="flex gap-2">
+          <div className="flex gap-2">
             <div className="relative flex-1">
               <IconKeyboard className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
                 type="text"
                 value={manualEntry}
                 onChange={(e) => setManualEntry(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && manualEntry.trim()) {
+                    e.preventDefault();
+                    onScan(manualEntry.trim());
+                    setManualEntry("");
+                  }
+                }}
                 placeholder={placeholder}
                 className="w-full pl-10 pr-4 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <Button
-              type="submit"
+              type="button"
               variant="secondary"
               disabled={!manualEntry.trim()}
+              onClick={() => {
+                if (manualEntry.trim()) {
+                  onScan(manualEntry.trim());
+                  setManualEntry("");
+                }
+              }}
             >
               Enter
             </Button>
-          </form>
+          </div>
         )}
 
         {/* Scanner CSS */}
