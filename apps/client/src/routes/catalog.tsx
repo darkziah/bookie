@@ -613,7 +613,7 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
                   required
                 />
                 {field.state.meta.errors ? (
-                  <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                  <em className="text-xs text-destructive">{field.state.meta.errors.map((e: any) => e?.message ?? String(e)).join(", ")}</em>
                 ) : null}
               </div>
             )}
@@ -634,7 +634,7 @@ function AddBookDialog({ onClose }: { onClose: () => void }) {
                   required
                 />
                 {field.state.meta.errors ? (
-                  <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                  <em className="text-xs text-destructive">{field.state.meta.errors.map((e: any) => e?.message ?? String(e)).join(", ")}</em>
                 ) : null}
               </div>
             )}

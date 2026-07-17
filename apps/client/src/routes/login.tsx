@@ -50,6 +50,7 @@ function LoginPage() {
   const { signIn } = useAuthActions();
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const form = useForm({
     defaultValues: {
@@ -61,12 +62,11 @@ function LoginPage() {
     },
     onSubmit: async ({ value }) => {
       setIsLoading(true);
+      setServerError(null);
       try {
         // For signup, check if invite exists first (unless system is in setup mode)
         if (isSignUp && !pendingInvite && !systemRequiresSetup) {
-          toast.error("No invitation found for this email", {
-            description: "Please contact an administrator for an invitation.",
-          });
+          setServerError("No invitation found for this email. Please contact an administrator.");
           setIsLoading(false);
           return;
         }
@@ -79,7 +79,7 @@ function LoginPage() {
 
         toast.success(isSignUp ? "Account created!" : "Welcome back!");
       } catch (error: any) {
-        toast.error(error.message || "Authentication failed");
+        setServerError(error.message || "Authentication failed");
       } finally {
         setIsLoading(false);
       }
@@ -225,12 +225,15 @@ function LoginPage() {
                       placeholder="Enter your email"
                       value={field.state.value}
                       onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
+                      onChange={(e) => {
+                        field.handleChange(e.target.value);
+                        setServerError(null);
+                      }}
                       required
                       disabled={isLoading}
                     />
                     {field.state.meta.errors ? (
-                      <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                      <em className="text-xs text-destructive">{field.state.meta.errors.map((e: any) => e?.message ?? String(e)).join(", ")}</em>
                     ) : null}
                     {/* Show invite status for signup */}
                     {isSignUp && field.state.value && field.state.value.includes("@") && !systemRequiresSetup && (
@@ -274,13 +277,16 @@ function LoginPage() {
                       placeholder="Enter your password"
                       value={field.state.value}
                       onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
+                      onChange={(e) => {
+                        field.handleChange(e.target.value);
+                        setServerError(null);
+                      }}
                       required
                       disabled={isLoading}
                       minLength={8}
                     />
                     {field.state.meta.errors ? (
-                      <em className="text-xs text-destructive">{field.state.meta.errors.join(", ")}</em>
+                      <em className="text-xs text-destructive">{field.state.meta.errors.map((e: any) => e?.message ?? String(e)).join(", ")}</em>
                     ) : null}
                   </div>
                 )}
@@ -307,12 +313,22 @@ function LoginPage() {
                   </Button>
                 )}
               />
+
+              {serverError && (
+                <div className="mt-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-2">
+                  <IconAlertCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
+                  <p className="text-sm text-destructive">{serverError}</p>
+                </div>
+              )}
             </form>
 
             <div className="mt-6 text-center">
               <button
                 type="button"
-                onClick={() => setIsSignUp(!isSignUp)}
+                onClick={() => {
+                  setIsSignUp(!isSignUp);
+                  setServerError(null);
+                }}
                 className="text-sm text-muted-foreground hover:text-primary transition-colors"
                 disabled={isLoading}
               >

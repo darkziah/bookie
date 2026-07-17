@@ -45,6 +45,7 @@ import {
   IconEdit,
   IconBan,
   IconCheck,
+  IconTrash,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
@@ -461,7 +462,7 @@ function AddFacultyDialog({ onClose }: { onClose: () => void }) {
             )}
           />
         </div>
-        <DialogFooter className="flex-row gap-2 mt-4">
+        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="flex-1">
             Cancel
           </Button>
@@ -489,7 +490,14 @@ function AddFacultyDialog({ onClose }: { onClose: () => void }) {
 
 function EditFacultyDialog({ faculty, onClose }: { faculty: any; onClose: () => void }) {
   const [isLoading, setIsLoading] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const updateFaculty = useMutation(api.faculty.update);
+  const deleteFaculty = useMutation(api.faculty.remove);
+
+  // Fetch detailed faculty info to check active loans for delete gating
+  const facultyDetails = useQuery(api.faculty.getByFacultyId, { facultyId: faculty.facultyId });
+  const hasActiveLoans = (facultyDetails?.activeLoanCount ?? 0) > 0;
 
   const form = useForm({
     defaultValues: {
@@ -528,6 +536,7 @@ function EditFacultyDialog({ faculty, onClose }: { faculty: any; onClose: () => 
   });
 
   return (
+    <>
     <DialogContent className="w-[95vw] sm:max-w-md">
       <DialogHeader>
         <DialogTitle>Edit Faculty</DialogTitle>
@@ -621,7 +630,7 @@ function EditFacultyDialog({ faculty, onClose }: { faculty: any; onClose: () => 
             )}
           />
         </div>
-        <DialogFooter className="flex-row gap-2 mt-4">
+        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="flex-1">
             Cancel
           </Button>
@@ -643,6 +652,76 @@ function EditFacultyDialog({ faculty, onClose }: { faculty: any; onClose: () => 
           />
         </DialogFooter>
       </form>
+
+      {/* Delete button — separated below the form */}
+      <div className="pt-2 border-t">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={() => setShowDeleteDialog(true)}
+          disabled={hasActiveLoans}
+          title={hasActiveLoans ? "Cannot delete: faculty has active loans. Return all books first." : undefined}
+        >
+          <IconTrash className="h-4 w-4 mr-2" />
+          Delete Faculty
+        </Button>
+        {hasActiveLoans && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Return {facultyDetails?.activeLoanCount} active loan(s) before deleting.
+          </p>
+        )}
+      </div>
     </DialogContent>
-  );
+
+    {/* Delete Confirmation Dialog */}
+    <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+      <DialogContent className="sm:max-w-md w-[95vw]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <IconTrash className="h-5 w-5" />
+            Delete Faculty
+          </DialogTitle>
+          <DialogDescription>
+            Are you sure you want to permanently delete{" "}
+            <span className="font-semibold">{faculty.name}</span>?
+            This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            variant="outline"
+            onClick={() => setShowDeleteDialog(false)}
+            className="w-full sm:w-auto"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              try {
+                setIsDeleting(true);
+                await deleteFaculty({ id: faculty._id as Id<"faculty"> });
+                toast.success("Faculty deleted");
+                setShowDeleteDialog(false);
+                onClose();
+              } catch (error: any) {
+                toast.error("Failed to delete faculty", { description: error.message });
+              } finally {
+                setIsDeleting(false);
+              }
+            }}
+            disabled={isDeleting}
+            className="w-full sm:w-auto"
+          >
+            {isDeleting ? (
+              <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : null}
+            Delete Faculty
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </>);
 }

@@ -49,6 +49,7 @@ import {
   IconBan,
   IconCheck,
   IconX,
+  IconTrash,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import type { Id } from "@convex/_generated/dataModel";
@@ -456,7 +457,7 @@ function AddStudentDialog({ onClose }: { onClose: () => void }) {
             )}
           />
         </div>
-        <DialogFooter className="flex-row gap-2 mt-4">
+        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="flex-1">
             Cancel
           </Button>
@@ -484,7 +485,14 @@ function AddStudentDialog({ onClose }: { onClose: () => void }) {
 
 function EditStudentDialog({ student, onClose }: { student: any; onClose: () => void }) {
   const [isLoading, setIsLoading] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const updateStudent = useMutation(api.students.update);
+  const deleteStudent = useMutation(api.students.remove);
+
+  // Fetch detailed student info to check active loans for delete gating
+  const studentDetails = useQuery(api.students.getByStudentId, { studentId: student.studentId });
+  const hasActiveLoans = (studentDetails?.activeLoanCount ?? 0) > 0;
 
   const form = useForm({
     defaultValues: {
@@ -517,6 +525,7 @@ function EditStudentDialog({ student, onClose }: { student: any; onClose: () => 
   });
 
   return (
+    <>
     <DialogContent className="w-[95vw] sm:max-w-md">
       <DialogHeader>
         <DialogTitle>Edit Student</DialogTitle>
@@ -606,7 +615,7 @@ function EditStudentDialog({ student, onClose }: { student: any; onClose: () => 
             )}
           />
         </div>
-        <DialogFooter className="flex-row gap-2 mt-4">
+        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 mt-4">
           <Button type="button" variant="outline" onClick={onClose} className="flex-1">
             Cancel
           </Button>
@@ -628,7 +637,77 @@ function EditStudentDialog({ student, onClose }: { student: any; onClose: () => 
           />
         </DialogFooter>
       </form>
+
+      {/* Delete button — separated below the form */}
+      <div className="pt-2 border-t">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={() => setShowDeleteDialog(true)}
+          disabled={hasActiveLoans}
+          title={hasActiveLoans ? "Cannot delete: student has active loans. Return all books first." : undefined}
+        >
+          <IconTrash className="h-4 w-4 mr-2" />
+          Delete Student
+        </Button>
+        {hasActiveLoans && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Return {studentDetails?.activeLoanCount} active loan(s) before deleting.
+          </p>
+        )}
+      </div>
     </DialogContent>
-  );
+
+    {/* Delete Confirmation Dialog */}
+    <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+      <DialogContent className="sm:max-w-md w-[95vw]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <IconTrash className="h-5 w-5" />
+            Delete Student
+          </DialogTitle>
+          <DialogDescription>
+            Are you sure you want to permanently delete{" "}
+            <span className="font-semibold">{student.name}</span>?
+            This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            variant="outline"
+            onClick={() => setShowDeleteDialog(false)}
+            className="w-full sm:w-auto"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              try {
+                setIsDeleting(true);
+                await deleteStudent({ id: student._id as Id<"students"> });
+                toast.success("Student deleted");
+                setShowDeleteDialog(false);
+                onClose();
+              } catch (error: any) {
+                toast.error("Failed to delete student", { description: error.message });
+              } finally {
+                setIsDeleting(false);
+              }
+            }}
+            disabled={isDeleting}
+            className="w-full sm:w-auto"
+          >
+            {isDeleting ? (
+              <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : null}
+            Delete Student
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </>);
 }
 
